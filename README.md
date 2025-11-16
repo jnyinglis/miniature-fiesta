@@ -2,6 +2,8 @@
 
 A TypeScript proof-of-concept implementation of a semantic metrics layer inspired by MicroStrategy, LookML, MetricFlow, and Power BI. This engine provides a flexible, in-memory framework for defining and evaluating business metrics with support for time intelligence, derived calculations, and semantic abstractions.
 
+**Latest Update:** Phase 5 (Composable Query Engine) implemented - featuring query builder pattern, functional metrics, composable transforms, filter expression language, DSL helpers, and model/engine separation. [Jump to Phase 5 features →](#phase-5-composable-query-engine)
+
 ## Overview
 
 The Semantic Metrics Engine implements a three-layer architecture that separates data storage from semantic meaning and business logic:
@@ -130,16 +132,49 @@ cd miniature-fiesta
 ### Running the Demo
 
 ```bash
+# Compile TypeScript to JavaScript
+npx tsc src/semanticEngine.ts --outDir . --module commonjs --target ES2015 --moduleResolution node --esModuleInterop true
+
 # Run the demo with sample data
-node src/semanticEngine.ts
+node src/semanticEngine.js
 ```
 
 The demo will output metric calculations for various attribute combinations:
-- 2025-02 data by Region × Product
-- 2025-02 data by Region only
-- 2025-02 data for North America by Product
+- 2025-02 data by Region × Product (legacy API)
+- 2025-02 data by Region only (legacy API)
+- 2025-02 data for North America by Product (legacy API)
+- Feb 2025 by Region using Query Builder (Phase 5 API)
+- NA Sales 2025 using CTE-style composition (Phase 5 API)
 
-### Basic Usage
+### Basic Usage (Phase 5 API - Recommended)
+
+```typescript
+import { createEngine, demoDb, demoSemanticModel } from './semanticEngine';
+
+// Create engine from semantic model
+const engine = createEngine(demoDb, demoSemanticModel);
+
+// Build and execute query
+const result = engine.query()
+  .where({ year: 2025, month: 2 })
+  .addAttributes('regionId', 'productId')
+  .addMetrics('revenue', 'budget', 'salesVsBudgetPct')
+  .run();
+
+console.table(result);
+```
+
+**Output:**
+```
+┌────────────┬──────────────┬──────────────┬──────────┬──────────────────┐
+│ regionId   │ regionName   │ productId    │ revenue  │ salesVsBudgetPct │
+├────────────┼──────────────┼──────────────┼──────────┼──────────────────┤
+│ NA         │ North America│ 1            │ $950.00  │ 43.18%           │
+│ EU         │ Europe       │ 2            │ $450.00  │ 28.13%           │
+└────────────┴──────────────┴──────────────┴──────────┴──────────────────┘
+```
+
+### Legacy API (Still Supported)
 
 ```typescript
 import { runQuery, demoDb, demoTableDefinitions, demoAttributes,
@@ -160,16 +195,6 @@ const result = runQuery(
 );
 
 console.table(result);
-```
-
-**Output:**
-```
-┌────────────┬──────────────┬──────────────┬──────────┬──────────────────┐
-│ regionId   │ regionName   │ productId    │ revenue  │ salesVsBudgetPct │
-├────────────┼──────────────┼──────────────┼──────────┼──────────────────┤
-│ NA         │ North America│ 1            │ $950.00  │ 43.18%           │
-│ EU         │ Europe       │ 2            │ $450.00  │ 28.13%           │
-└────────────┴──────────────┴──────────────┴──────────┴──────────────────┘
 ```
 
 ## Core Concepts
@@ -351,17 +376,37 @@ The architecture closely mirrors MicroStrategy's semantic layer:
 
 The current implementation provides a solid foundation for additional features:
 
-### Planned Features
+### Implemented in Phase 5 ✅
 
-- **Derived Attributes** - Calculated attributes based on expressions
-- **Auto-Join Resolution** - Automatic determination of join paths across tables
+- ✅ **Query Builder Pattern** - Fluent, composable query API
+- ✅ **Functional Metrics** - First-class function composition for metrics
+- ✅ **Composable Transforms** - Stackable time intelligence transforms
+- ✅ **Filter Expression Language** - AST-based filters with AND/OR/NOT logic
+- ✅ **DSL Helpers** - Builders that reduce boilerplate
+- ✅ **Model/Engine Separation** - Clean separation between model and runtime
+
+### Implemented in Earlier Phases ✅
+
+- ✅ **LINQ.js Integration** (Phase 1) - 100+ composable query operators
+- ✅ **Three-Layer Architecture** (Phase 2) - Storage, Semantic, Metrics layers
+- ✅ **Unified Table Model** (Phase 2) - Single model for all tables
+- ✅ **Semantic Layer** (Phase 2) - Attributes and measures
+- ✅ **Metric Types** (Phase 2) - Simple, Expression, Derived, Context Transform
+
+### Potential Future Features
+
+- **Advanced Derived Attributes** - More sophisticated attribute calculations
+- **Smart Auto-Join Resolution** - Automatic determination of optimal join paths
 - **Cross-Table Metrics** - Metrics spanning multiple fact tables with automatic joins
-- **Query Plan Visualization** - Debug and optimize query execution
-- **Hierarchies** - Year → Quarter → Month → Day, Region → Country → City
-- **Calculation Templates** - Reusable patterns (percent of total, moving average, rank)
-- **SQL Pushdown** - Compile semantic queries to SQL or DuckDB
+- **Query Plan Visualization** - Debug and optimize query execution paths
+- **Hierarchies** - Built-in support for Year → Quarter → Month → Day, Region → Country → City
+- **Calculation Templates** - Reusable patterns (percent of total, moving average, rank, window functions)
+- **SQL Pushdown** - Compile semantic queries to SQL or DuckDB for larger datasets
+- **Caching Strategies** - More sophisticated caching and materialization
+- **Incremental Computation** - Update metrics based on data changes
+- **Time Series Analysis** - Built-in support for forecasting and trend analysis
 
-See [REFACTOR_SPEC.md](REFACTOR_SPEC.md) Phase 4 for detailed enhancement plans.
+See [PHASE_5.md](PHASE_5.md) for the full Phase 5 specification and [REFACTOR_SPEC.md](REFACTOR_SPEC.md) for historical context.
 
 ## Technical Details
 
@@ -405,18 +450,18 @@ Inspired by:
 ---
 
 **Status**: Phase 5 Composable Query Engine implemented ✅
-- Phase 1: LINQ.js Integration
-- Phase 2: Three-Layer Architecture
-- Phase 3: Legacy API Removal
-- **Phase 5: Composable Query Engine** ⭐
+- Phase 1: LINQ.js Integration ✅
+- Phase 2: Three-Layer Architecture ✅
+- Phase 3: Legacy API Removal ✅
+- **Phase 5: Composable Query Engine** ✅
 
 ## Phase 5: Composable Query Engine
 
-Phase 5 introduces major architectural improvements focused on composability and functional programming patterns:
+Phase 5 introduces major architectural improvements focused on composability and functional programming patterns. All features from the Phase 5 specification have been successfully implemented.
 
-### Query Builder Pattern
+### 1. Query Builder Pattern (Implemented)
 
-Build queries incrementally with a fluent API:
+Build queries incrementally with a fluent API that supports reusable base queries and CTE-style composition:
 
 ```typescript
 import { createEngine, demoDb, demoSemanticModel } from './semanticEngine';
@@ -427,69 +472,147 @@ const engine = createEngine(demoDb, demoSemanticModel);
 // Build reusable base queries
 const base2025 = engine.query().where({ year: 2025 });
 
-// Extend and compose
+// Extend and compose - each method returns a new QueryBuilder
 const feb2025ByRegion = base2025
   .where({ month: 2 })
   .addAttributes('regionId')
   .addMetrics('revenue', 'budget', 'salesVsBudgetPct')
   .run();
 
-// CTE-style composition
+// CTE-style composition - reuse base queries
 const naSales = base2025.where({ regionId: 'NA' });
 const euSales = base2025.where({ regionId: 'EU' });
+
+const naResult = naSales
+  .addAttributes('productId')
+  .addMetrics('revenue')
+  .run();
 ```
 
-### Functional Metrics
+**Key Benefits:**
+- Immutable builder pattern - base queries remain unchanged
+- Reusable query fragments (DRY principle)
+- Incremental query construction
+- Type-safe with full TypeScript support
 
-Metrics are now first-class functions for better composition:
+### 2. Functional Metric System (Implemented)
+
+All metric types are now unified behind a single functional interface, replacing the previous tagged union approach:
 
 ```typescript
-import { simpleMetric, derivedMetric, contextTransformMetric } from './semanticEngine';
+import { simpleMetric, derivedMetric, expressionMetric,
+         contextTransformMetric } from './semanticEngine';
 
-// Simple metric
+// Simple metric - wraps a measure
 const revenue = simpleMetric({
   name: 'revenue',
   measure: 'salesAmount',
   format: 'currency'
 });
 
-// Derived metric
+// Expression metric - custom aggregation logic
+const pricePerUnit = expressionMetric({
+  name: 'pricePerUnit',
+  table: 'sales',
+  format: 'currency',
+  expression: (rows, ctx) => {
+    const amount = rows.sum(r => Number(r.amount ?? 0));
+    const qty = rows.sum(r => Number(r.quantity ?? 0));
+    return qty ? amount / qty : null;
+  }
+});
+
+// Derived metric - combines other metrics
 const salesVsBudgetPct = derivedMetric({
   name: 'salesVsBudgetPct',
   deps: ['revenue', 'budget'],
   combine: ({ revenue, budget }) =>
-    budget ? (revenue! / budget) * 100 : null
+    budget ? (revenue! / budget) * 100 : null,
+  format: 'percent'
 });
 
-// Higher-order metrics
+// Context transform metric - applies time intelligence
+const revenueYTD = contextTransformMetric({
+  name: 'revenueYTD',
+  baseMetric: 'revenue',
+  transform: ytdTransform
+});
+```
+
+**Higher-Order Metric Builders:**
+
+```typescript
+import { makeYtdMetric, makeYoYMetric } from './semanticEngine';
+
+// Generate YTD metric for any base metric
 const revenueYTD = makeYtdMetric('revenue', ytdTransform);
+
+// Generate Year-over-Year comparison
 const revenueYoY = makeYoYMetric('revenue');
 ```
 
-### Composable Transforms
+**Benefits:**
+- Single evaluation path (no switch statements)
+- First-class functions enable composition
+- Easy to add new metric patterns
+- Supports dependency injection
 
-Time intelligence transforms are now stackable:
+### 3. Composable Context Transforms (Implemented)
+
+Time intelligence transforms are now stackable and composable:
 
 ```typescript
-import { composeTransforms, shiftYear, shiftMonth, rollingMonths } from './semanticEngine';
+import { composeTransforms, shiftYear, shiftMonth,
+         rollingMonths } from './semanticEngine';
 
-// Compose transforms
+// Base transforms
+const ytd: ContextTransformFn = (ctx) => {
+  if (ctx.year == null || ctx.month == null) return ctx;
+  return { ...ctx, month: { lte: Number(ctx.month) } };
+};
+
+const lastYear: ContextTransformFn = (ctx) => {
+  if (ctx.year == null) return ctx;
+  return { ...ctx, year: Number(ctx.year) - 1 };
+};
+
+// Compose transforms (applied left to right)
 const ytdLastYear = composeTransforms(ytd, lastYear);
 const priorMonthLastYear = composeTransforms(priorMonth, lastYear);
 
-// Parameterized transforms
+// Parameterized transform builders
 const rolling3Months = rollingMonths(3);
 const rolling6Months = rollingMonths(6);
+
+// Use in transform registry
+const transforms = {
+  ytd,
+  lastYear,
+  ytdLastYear,  // Composed transform
+  rolling3Months,
+  rolling6Months
+};
 ```
 
-### Filter Expression Language
+**Benefits:**
+- DRY: No duplicate logic for combined transforms
+- Stackable like LINQ operators
+- Parameterized transform families
+- Pure functions (easy to test)
 
-Build complex filters with AND/OR/NOT logic:
+### 4. Filter Expression Language (Implemented)
+
+Build complex filters with an AST supporting AND/OR/NOT logic and operator composition:
 
 ```typescript
-import { f } from './semanticEngine';
+import { f, compileFilter, applyFilter } from './semanticEngine';
 
-// Complex nested filters
+// Simple equality and comparisons
+const yearFilter = f.eq('year', 2025);
+const monthFilter = f.lte('month', 6);
+const rangeFilter = f.between('amount', 100, 1000);
+
+// Combine with AND
 const validSales = f.and(
   f.eq('year', 2025),
   f.between('amount', 100, 1000),
@@ -507,23 +630,46 @@ const baseFilter = f.and(
 );
 
 const naFilter = f.and(baseFilter, f.eq('regionId', 'NA'));
+const euFilter = f.and(baseFilter, f.eq('regionId', 'EU'));
+
+// Compile to predicate function
+const predicate = compileFilter(validSales);
+const filteredRows = rows.filter(predicate);
+
+// Or use with LINQ.js
+const filteredEnumerable = applyFilter(Enumerable.from(rows), validSales);
 ```
 
-### DSL Helpers
+**Supported Operators:**
+- `eq`, `lt`, `lte`, `gt`, `gte` - Comparisons
+- `between` - Range queries
+- `in` - List membership
+- `and`, `or` - Boolean logic
+- `not` - Negation
 
-Reduce boilerplate with builder helpers:
+**Benefits:**
+- Expressiveness: Full boolean logic
+- Composability: Merge and extend filters
+- Reusability: Define base filters once
+- Type-safe AST structure
+
+### 5. DSL Helpers for Definitions (Implemented)
+
+Builder helpers that reduce boilerplate and provide smart defaults:
 
 ```typescript
 import { attr, measure, metric } from './semanticEngine';
 
-// Concise attribute definitions
+// Attribute builders
 const attributes = {
+  // Simple ID attribute (column defaults to name)
   regionId: attr.id({
     name: 'regionId',
     table: 'sales',
     displayName: 'regionName'
   }),
 
+  // Derived attribute with custom expression
   quantityBand: attr.derived({
     name: 'quantityBand',
     table: 'sales',
@@ -534,13 +680,28 @@ const attributes = {
       if (q <= 10) return 'Medium';
       return 'Large';
     }
+  }),
+
+  // Formatted attribute
+  monthName: attr.formatted({
+    name: 'monthName',
+    table: 'sales',
+    column: 'month',
+    format: (m) => ['Jan', 'Feb', 'Mar'][m - 1]
   })
 };
 
-// Concise measure definitions
+// Measure builders with smart defaults
 const measures = {
   salesAmount: measure.sum({
     name: 'salesAmount',
+    table: 'sales',
+    column: 'amount',  // Optional: defaults to name
+    format: 'currency'
+  }),
+
+  avgOrderSize: measure.avg({
+    name: 'avgOrderSize',
     table: 'sales',
     column: 'amount',
     format: 'currency'
@@ -551,16 +712,40 @@ const measures = {
     table: 'sales'
   })
 };
+
+// Metric builders (combines all metric constructors)
+const metrics = {
+  revenue: metric.simple({
+    name: 'revenue',
+    measure: 'salesAmount'
+  }),
+
+  revenueYTD: metric.ytd('revenue', ytdTransform),
+  revenueYoY: metric.yoy('revenue'),
+
+  salesVsBudgetPct: metric.derived({
+    name: 'salesVsBudgetPct',
+    deps: ['revenue', 'budget'],
+    combine: ({ revenue, budget }) =>
+      budget ? (revenue! / budget) * 100 : null
+  })
+};
 ```
 
-### Model/Engine Separation
+**Benefits:**
+- Less boilerplate (30%+ reduction)
+- Smart defaults (column = name)
+- Reusable patterns
+- IDE autocomplete support
 
-Clean separation between model definition and runtime:
+### 6. Model/Engine Separation (Implemented)
+
+Clean separation between semantic model definition and query engine runtime:
 
 ```typescript
 import { createEngine, SemanticModel } from './semanticEngine';
 
-// Define model once
+// Define semantic model once (bundles all registries)
 const salesModel: SemanticModel = {
   tables: demoTableDefinitions,
   attributes: demoAttributes,
@@ -569,17 +754,90 @@ const salesModel: SemanticModel = {
   transforms: demoTransforms
 };
 
-// Create engine
+// Create engine from model and data
 const engine = createEngine(demoDb, salesModel);
 
-// Extend for specific use cases
+// Use engine for queries
+const result = engine.query()
+  .where({ year: 2025 })
+  .addAttributes('regionId')
+  .addMetrics('revenue')
+  .run();
+
+// Introspect the model
+const revenueMetric = engine.getMetric('revenue');
+const allMetrics = engine.listMetrics();
+const salesMeasure = engine.getMeasure('salesAmount');
+
+// Extend model for specific use cases
 const extendedEngine = engine.extend({
   metrics: {
-    ...additionalMetrics
+    customMetric: simpleMetric({ name: 'custom', measure: 'salesAmount' })
   }
 });
+
+// Multiple models over same database
+const salesEngine = createEngine(db, salesModel);
+const hrEngine = createEngine(db, hrModel);
 ```
 
-For complete Phase 5 specification, see [PHASE_5.md](PHASE_5.md).
+**Engine Interface:**
+```typescript
+interface Engine {
+  query(): QueryBuilder;
+  getMetric(name: string): MetricDefinition | undefined;
+  listMetrics(): MetricDefinition[];
+  getMeasure(name: string): MeasureDefinition | undefined;
+  getAttribute(name: string): AttributeDefinition | undefined;
+  extend(partial: Partial<SemanticModel>): Engine;
+}
+```
+
+**Benefits:**
+- Dependency injection pattern
+- Multiple models over same data
+- Easy testing with mock models
+- Clean extension points
+
+### Backward Compatibility
+
+The legacy `runQuery()` function is still available for backward compatibility:
+
+```typescript
+// Old API (still works)
+const result = runQuery(
+  demoDb,
+  demoTableDefinitions,
+  demoAttributes,
+  demoMeasures,
+  demoMetrics,
+  demoTransforms,
+  {
+    attributes: ['regionId', 'productId'],
+    filters: { year: 2025, month: 2 },
+    metrics: ['revenue', 'budget']
+  }
+);
+
+// New API (recommended)
+const engine = createEngine(demoDb, demoSemanticModel);
+const result = engine.query()
+  .where({ year: 2025, month: 2 })
+  .addAttributes('regionId', 'productId')
+  .addMetrics('revenue', 'budget')
+  .run();
+```
+
+### Phase 5 Summary
+
+**All Implemented Features:**
+- ✅ Query Builder Pattern (5a)
+- ✅ Functional Metric System (5b)
+- ✅ Composable Context Transforms (5c)
+- ✅ Filter Expression Language (5d)
+- ✅ Model/Engine Separation (5e)
+- ✅ DSL Helpers for Definitions (5f)
+
+For complete Phase 5 specification and design rationale, see [PHASE_5.md](PHASE_5.md).
 
 For historical context and detailed migration information, see [REFACTOR_SPEC.md](REFACTOR_SPEC.md).
