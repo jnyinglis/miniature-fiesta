@@ -14,7 +14,11 @@ const {
   demoMetrics,
   demoTransforms,
   demoDimensionConfig,
+  demoTableDefinitions,
+  demoAttributes,
+  demoMeasures,
   runQuery,
+  runQueryV2,
   evaluateMetric,
   evaluateMetrics,
   applyContextToFact,
@@ -657,6 +661,176 @@ try {
 }
 
 // ============================================================================
+// Test Suite 12: Phase 2 - Storage Layer (Unified Tables)
+// ============================================================================
+
+console.log('Test Suite 12: Phase 2 - Storage Layer (Unified Tables)');
+console.log('-'.repeat(80));
+
+try {
+  // Test 12.1: Verify unified tables structure
+  assert(demoDb.tables, 'Database has unified tables property');
+  assert(demoDb.tables.sales, 'Sales table exists in unified structure');
+  assert(demoDb.tables.products, 'Products table exists in unified structure');
+  assert(demoDb.tables.regions, 'Regions table exists in unified structure');
+  assert(demoDb.tables.budget, 'Budget table exists in unified structure');
+
+  // Test 12.2: Verify table definitions
+  assert(demoTableDefinitions.sales, 'Sales table definition exists');
+  assert(demoTableDefinitions.sales.columns, 'Sales table has column definitions');
+  assert(demoTableDefinitions.sales.relationships, 'Sales table has relationships defined');
+  assertEquals(demoTableDefinitions.sales.relationships.length, 2, 'Sales table has 2 relationships');
+
+  console.log('✓ All unified tables tests passed\n');
+
+} catch (error) {
+  console.error('✗ Unified tables test failed:', error.message);
+  console.log();
+}
+
+// ============================================================================
+// Test Suite 13: Phase 2 - Semantic Layer (Attributes & Measures)
+// ============================================================================
+
+console.log('Test Suite 13: Phase 2 - Semantic Layer (Attributes & Measures)');
+console.log('-'.repeat(80));
+
+try {
+  // Test 13.1: Verify attribute registry
+  assert(demoAttributes, 'Attribute registry exists');
+  assert(demoAttributes.year, 'Year attribute exists');
+  assert(demoAttributes.month, 'Month attribute exists');
+  assert(demoAttributes.regionId, 'RegionId attribute exists');
+  assert(demoAttributes.productId, 'ProductId attribute exists');
+
+  // Test 13.2: Verify attribute properties
+  assertEquals(demoAttributes.year.table, 'sales', 'Year attribute points to sales table');
+  assertEquals(demoAttributes.regionId.displayName, 'regionName', 'RegionId has display name');
+
+  // Test 13.3: Verify measure registry
+  assert(demoMeasures, 'Measure registry exists');
+  assert(demoMeasures.salesAmount, 'SalesAmount measure exists');
+  assert(demoMeasures.salesQuantity, 'SalesQuantity measure exists');
+  assert(demoMeasures.budgetAmount, 'BudgetAmount measure exists');
+
+  // Test 13.4: Verify measure properties
+  assertEquals(demoMeasures.salesAmount.aggregation, 'sum', 'SalesAmount uses sum aggregation');
+  assertEquals(demoMeasures.salesAmount.format, 'currency', 'SalesAmount has currency format');
+
+  console.log('✓ All semantic layer tests passed\n');
+
+} catch (error) {
+  console.error('✗ Semantic layer test failed:', error.message);
+  console.log();
+}
+
+// ============================================================================
+// Test Suite 14: Phase 2 - Simple Metrics
+// ============================================================================
+
+console.log('Test Suite 14: Phase 2 - Simple Metrics');
+console.log('-'.repeat(80));
+
+try {
+  // Test 14.1: Verify simple metric definitions
+  assert(demoMetrics.revenue, 'Revenue simple metric exists');
+  assertEquals(demoMetrics.revenue.kind, 'simple', 'Revenue is a simple metric');
+  assertEquals(demoMetrics.revenue.measure, 'salesAmount', 'Revenue references salesAmount measure');
+
+  // Test 14.2: Evaluate simple metric
+  const revenueValue = evaluateMetric(
+    'revenue',
+    demoDb,
+    demoFactTables,
+    demoMetrics,
+    { year: 2025, month: 2 },
+    demoTransforms,
+    new Map(),
+    demoMeasures
+  );
+
+  assert(revenueValue !== null && revenueValue !== undefined, 'Revenue metric evaluates successfully');
+  assert(revenueValue > 0, 'Revenue metric returns positive value');
+
+  // Test 14.3: Compare simple metric to factMeasure metric
+  const totalSalesValue = evaluateMetric(
+    'totalSalesAmount',
+    demoDb,
+    demoFactTables,
+    demoMetrics,
+    { year: 2025, month: 2 },
+    demoTransforms,
+    new Map(),
+    demoMeasures
+  );
+
+  assertEquals(revenueValue, totalSalesValue, 'Simple metric matches equivalent factMeasure metric');
+
+  console.log('✓ All simple metric tests passed\n');
+
+} catch (error) {
+  console.error('✗ Simple metric test failed:', error.message);
+  console.log();
+}
+
+// ============================================================================
+// Test Suite 15: Phase 2 - runQueryV2 (New Query Engine)
+// ============================================================================
+
+console.log('Test Suite 15: Phase 2 - runQueryV2 (New Query Engine)');
+console.log('-'.repeat(80));
+
+try {
+  // Test 15.1: Basic query with attributes
+  const result = runQueryV2(
+    demoDb,
+    demoTableDefinitions,
+    demoAttributes,
+    demoMeasures,
+    demoMetrics,
+    demoTransforms,
+    {
+      attributes: ['regionId'],
+      filters: { year: 2025, month: 2 },
+      metrics: ['revenue', 'quantity']
+    }
+  );
+
+  assert(result.length > 0, 'runQueryV2 returns results');
+  assert(result[0].regionId !== undefined, 'Result contains regionId attribute');
+  assert(result[0].revenue !== undefined, 'Result contains revenue metric');
+  assert(result[0].quantity !== undefined, 'Result contains quantity metric');
+
+  // Test 15.2: Query with multiple attributes
+  const result2 = runQueryV2(
+    demoDb,
+    demoTableDefinitions,
+    demoAttributes,
+    demoMeasures,
+    demoMetrics,
+    demoTransforms,
+    {
+      attributes: ['regionId', 'productId'],
+      filters: { year: 2025, month: 2 },
+      metrics: ['revenue']
+    }
+  );
+
+  assert(result2.length > 0, 'runQueryV2 with multiple attributes returns results');
+  assert(result2[0].regionId !== undefined, 'Multi-attribute result contains regionId');
+  assert(result2[0].productId !== undefined, 'Multi-attribute result contains productId');
+
+  // Test 15.3: Display names are resolved
+  assert(result[0].regionName !== undefined, 'Display name (regionName) is resolved');
+
+  console.log('✓ All runQueryV2 tests passed\n');
+
+} catch (error) {
+  console.error('✗ runQueryV2 test failed:', error.message);
+  console.log();
+}
+
+// ============================================================================
 // Test Summary
 // ============================================================================
 
@@ -670,7 +844,7 @@ console.log('='.repeat(80));
 
 if (failedTests === 0) {
   console.log('✓ ALL TESTS PASSED!');
-  console.log('Phase 1 (LINQ.js Integration) is complete and validated.');
+  console.log('Phase 1 (LINQ.js Integration) and Phase 2 (Three-Layer Model) are complete and validated.');
   process.exit(0);
 } else {
   console.error('✗ SOME TESTS FAILED');

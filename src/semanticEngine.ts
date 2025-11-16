@@ -29,12 +29,35 @@ export type FilterValue = FilterPrimitive | FilterRange;
 export type FilterContext = Record<string, FilterValue>;
 
 /**
- * In-memory DB: dimensions + facts.
- * This is a POC dataset; in a real app you’d wire your own.
+ * Table definition: describes a table's schema and relationships.
+ * Phase 2: Unified table model - no distinction between dimensions and facts.
+ */
+export interface TableDefinition {
+  name: string;
+
+  columns: Record<string, {
+    dataType: 'string' | 'number' | 'date' | 'boolean';
+  }>;
+
+  primaryKey?: string[];
+
+  relationships?: Array<{
+    to: string;          // Target table name
+    from: string[];      // Foreign key column(s) in this table
+    toColumns: string[]; // Primary key column(s) in target table
+    type: '1:1' | '1:M' | 'M:M';
+  }>;
+}
+
+export type TableRegistry = Record<string, TableDefinition>;
+
+/**
+ * In-memory DB: unified table storage.
+ * Phase 2: All tables (formerly "dimensions" and "facts") are stored together.
+ * This is a POC dataset; in a real app you'd wire your own.
  */
 export interface InMemoryDb {
-  dimensions: Record<string, Row[]>;
-  facts: Record<string, Row[]>;
+  tables: Record<string, Row[]>;
 }
 
 /**
@@ -74,6 +97,46 @@ export interface DimensionConfigEntry {
 export type DimensionConfig = Record<string, DimensionConfigEntry>;
 
 /**
+ * Phase 2: Semantic Layer - Attribute Definitions
+ * Attributes define how to slice and dice the data.
+ */
+export interface AttributeDefinition {
+  name: string;              // Unique attribute ID
+  table: string;             // Source table
+  column: string;            // Source column
+  description?: string;
+
+  // Optional: Display name from related table
+  displayName?: string;      // e.g., "regionName" for regionId
+
+  // Optional: Transform the value
+  format?: (value: any) => string;
+
+  // Optional: Derived attribute (calculated)
+  expression?: (row: Row) => any;
+}
+
+export type AttributeRegistry = Record<string, AttributeDefinition>;
+
+/**
+ * Phase 2: Semantic Layer - Measure Definitions
+ * Measures define how to aggregate columns.
+ */
+export interface MeasureDefinition {
+  name: string;              // Unique measure ID
+  table: string;             // Source table
+  column: string;            // Source column
+  aggregation: 'sum' | 'avg' | 'count' | 'min' | 'max' | 'distinct';
+  format?: string;           // 'currency', 'integer', 'percent'
+  description?: string;
+
+  // Optional: Custom aggregation logic
+  expression?: (rows: Enumerable.IEnumerable<Row>) => number | null;
+}
+
+export type MeasureRegistry = Record<string, MeasureDefinition>;
+
+/**
  * Metric definitions
  */
 
@@ -85,6 +148,15 @@ interface MetricBase {
   description?: string;
   /** Suggested format (currency, integer, percent, etc.) */
   format?: string;
+}
+
+/**
+ * Phase 2: Simple metric - wraps a measure from the measure registry.
+ */
+export interface SimpleMetric extends MetricBase {
+  kind: "simple";
+  measure: string;           // Reference to MeasureRegistry
+  grain?: string[];          // Optional: restrict to specific attributes
 }
 
 /**
@@ -146,8 +218,10 @@ export interface ContextTransformMetric extends MetricBase {
 
 /**
  * Union of all metric definitions.
+ * Phase 2: Added SimpleMetric.
  */
 export type MetricDefinition =
+  | SimpleMetric
   | FactMeasureMetric
   | ExpressionMetric
   | DerivedMetric
@@ -248,6 +322,7 @@ export function pick(obj: Row, keys: string[]): Row {
 
 /**
  * Enrich dimension keys with their label fields, using dimensionConfig.
+ * Phase 2: Updated to use unified tables.
  */
 export function enrichDimensions(
   keyObj: Row,
@@ -258,7 +333,7 @@ export function enrichDimensions(
   for (const [dimKey, cfg] of Object.entries(dimensionConfig)) {
     if (keyObj[dimKey] == null) continue;
 
-    const dimTable = db.dimensions[cfg.table];
+    const dimTable = db.tables[cfg.table];
     if (!dimTable) continue;
 
     const match = dimTable.find((d) => d[cfg.key] === keyObj[dimKey]);
@@ -279,6 +354,7 @@ function cacheKey(metricName: string, context: FilterContext): string {
 
 /**
  * Evaluate a single metric with context and cache.
+ * Phase 2: Added measureRegistry parameter for SimpleMetric support.
  */
 export function evaluateMetric(
   metricName: string,
@@ -287,7 +363,8 @@ export function evaluateMetric(
   metricRegistry: MetricRegistry,
   context: FilterContext,
   transforms: ContextTransformsRegistry,
-  cache: Map<string, number | null> = new Map()
+  cache: Map<string, number | null> = new Map(),
+  measureRegistry?: MeasureRegistry
 ): number | null {
   const key = cacheKey(metricName, context);
   if (cache.has(key)) {
@@ -301,11 +378,58 @@ export function evaluateMetric(
 
   let value: number | null;
 
-  if (def.kind === "factMeasure") {
+  if (def.kind === "simple") {
+    // Phase 2: Simple metric - resolve from measure registry
+    if (!measureRegistry) {
+      throw new Error(`MeasureRegistry required for simple metrics`);
+    }
+
+    const measureDef = measureRegistry[def.measure];
+    if (!measureDef) {
+      throw new Error(`Unknown measure: ${def.measure}`);
+    }
+
+    const rows = db.tables[measureDef.table];
+    if (!rows) throw new Error(`Missing rows for table: ${measureDef.table}`);
+
+    // Use metric grain if specified, otherwise use all table columns as grain
+    const grain = def.grain ?? Object.keys(rows[0] || {});
+    const filteredRows = applyContextToFact(rows, context, grain);
+
+    // Apply aggregation based on measure definition
+    if (measureDef.expression) {
+      value = measureDef.expression(filteredRows);
+    } else {
+      const col = measureDef.column;
+      switch (measureDef.aggregation) {
+        case "sum":
+          value = filteredRows.sum((r: Row) => Number(r[col] ?? 0));
+          break;
+        case "avg":
+          value = filteredRows.average((r: Row) => Number(r[col] ?? 0));
+          break;
+        case "count":
+          value = filteredRows.count();
+          break;
+        case "min":
+          value = filteredRows.min((r: Row) => Number(r[col] ?? 0));
+          break;
+        case "max":
+          value = filteredRows.max((r: Row) => Number(r[col] ?? 0));
+          break;
+        case "distinct":
+          value = filteredRows.distinct((r: Row) => r[col]).count();
+          break;
+        default:
+          throw new Error(`Unsupported aggregation: ${measureDef.aggregation}`);
+      }
+    }
+
+  } else if (def.kind === "factMeasure") {
     const factDef = factTables[def.factTable];
     if (!factDef) throw new Error(`Unknown fact table: ${def.factTable}`);
 
-    const rows = db.facts[def.factTable];
+    const rows = db.tables[def.factTable];
     if (!rows) throw new Error(`Missing rows for fact table: ${def.factTable}`);
 
     const grain = def.grain ?? factDef.grain;
@@ -335,7 +459,7 @@ export function evaluateMetric(
     const factDef = factTables[def.factTable];
     if (!factDef) throw new Error(`Unknown fact table: ${def.factTable}`);
 
-    const rows = db.facts[def.factTable];
+    const rows = db.tables[def.factTable];
     if (!rows) throw new Error(`Missing rows for fact table: ${def.factTable}`);
 
     const grain = def.grain ?? factDef.grain;
@@ -352,7 +476,8 @@ export function evaluateMetric(
         metricRegistry,
         context,
         transforms,
-        cache
+        cache,
+        measureRegistry
       );
     }
     value = def.evalFromDeps(depValues, db, context);
@@ -370,7 +495,8 @@ export function evaluateMetric(
       metricRegistry,
       transformedContext,
       transforms,
-      cache
+      cache,
+      measureRegistry
     );
   } else {
     const exhaustiveCheck: never = def;
@@ -383,6 +509,7 @@ export function evaluateMetric(
 
 /**
  * Evaluate multiple metrics together, sharing a cache.
+ * Phase 2: Added measureRegistry parameter.
  */
 export function evaluateMetrics(
   metricNames: string[],
@@ -390,7 +517,8 @@ export function evaluateMetrics(
   factTables: FactTableRegistry,
   metricRegistry: MetricRegistry,
   context: FilterContext,
-  transforms: ContextTransformsRegistry
+  transforms: ContextTransformsRegistry,
+  measureRegistry?: MeasureRegistry
 ): Record<string, number | null> {
   const cache = new Map<string, number | null>();
   const results: Record<string, number | null> = {};
@@ -402,7 +530,8 @@ export function evaluateMetrics(
       metricRegistry,
       context,
       transforms,
-      cache
+      cache,
+      measureRegistry
     );
   }
   return results;
@@ -418,17 +547,27 @@ export interface RunQueryOptions {
   factForRows: string;    // fact table used to find distinct row combinations
 }
 
+/**
+ * Phase 2: New query options using attributes instead of rows.
+ */
+export interface RunQueryOptionsV2 {
+  attributes: string[];   // Attribute names (can come from any table)
+  filters?: FilterContext;
+  metrics: string[];      // Metric IDs
+}
+
 export function runQuery(
   db: InMemoryDb,
   factTables: FactTableRegistry,
   metricRegistry: MetricRegistry,
   transforms: ContextTransformsRegistry,
   dimensionConfig: DimensionConfig,
-  options: RunQueryOptions
+  options: RunQueryOptions,
+  measureRegistry?: MeasureRegistry
 ): Row[] {
   const { rows: rowDims, filters = {}, metrics, factForRows } = options;
 
-  const factRows = db.facts[factForRows];
+  const factRows = db.tables[factForRows];
   if (!factRows) throw new Error(`Unknown fact table: ${factForRows}`);
 
   const factGrain = Object.keys(factRows[0] || {});
@@ -460,7 +599,8 @@ export function runQuery(
         metricRegistry,
         rowContext,
         transforms,
-        cache
+        cache,
+        measureRegistry
       );
       const def = metricRegistry[m];
       metricValues[m] = formatValue(numericValue, def.format);
@@ -476,6 +616,138 @@ export function runQuery(
   return result;
 }
 
+/**
+ * Phase 2: Enhanced query engine using the semantic layer.
+ * This version uses attributes and measures instead of direct table references.
+ */
+export function runQueryV2(
+  db: InMemoryDb,
+  tableRegistry: TableRegistry,
+  attributeRegistry: AttributeRegistry,
+  measureRegistry: MeasureRegistry,
+  metricRegistry: MetricRegistry,
+  transforms: ContextTransformsRegistry,
+  options: RunQueryOptionsV2
+): Row[] {
+  const { attributes: attrNames, filters = {}, metrics } = options;
+
+  // Determine the primary table based on attributes
+  // For now, use the first attribute's table as the primary table
+  // In a full implementation, this would use a more sophisticated algorithm
+  if (attrNames.length === 0) {
+    throw new Error('At least one attribute is required');
+  }
+
+  const primaryAttr = attributeRegistry[attrNames[0]];
+  if (!primaryAttr) {
+    throw new Error(`Unknown attribute: ${attrNames[0]}`);
+  }
+
+  const primaryTable = primaryAttr.table;
+  const tableRows = db.tables[primaryTable];
+  if (!tableRows) {
+    throw new Error(`Missing rows for table: ${primaryTable}`);
+  }
+
+  // Apply filters to get distinct attribute combinations
+  const tableGrain = Object.keys(tableRows[0] || {});
+  const filtered = applyContextToFact(tableRows, filters, tableGrain);
+
+  // Extract attribute columns from the primary table
+  const attrColumns: string[] = [];
+  const attrDefs: Record<string, AttributeDefinition> = {};
+
+  for (const attrName of attrNames) {
+    const attrDef = attributeRegistry[attrName];
+    if (!attrDef) {
+      throw new Error(`Unknown attribute: ${attrName}`);
+    }
+    attrDefs[attrName] = attrDef;
+    attrColumns.push(attrDef.column);
+  }
+
+  // Group by attribute combinations
+  const groups = filtered
+    .groupBy(
+      (r: Row) => JSON.stringify(pick(r, attrColumns)),
+      (r: Row) => r
+    )
+    .toArray();
+
+  const cache = new Map<string, number | null>();
+  const result: Row[] = [];
+
+  for (const g of groups) {
+    const keyObj: Row = JSON.parse(g.key());
+
+    // Build the row context from filters and attribute values
+    const rowContext: FilterContext = {
+      ...filters,
+      ...keyObj,
+    };
+
+    // Build the output row with attribute values
+    const outputRow: Row = {};
+
+    // Add attribute values (with transformations if specified)
+    for (const attrName of attrNames) {
+      const attrDef = attrDefs[attrName];
+      const rawValue = keyObj[attrDef.column];
+
+      if (attrDef.expression) {
+        // Use expression if defined
+        outputRow[attrName] = attrDef.expression({ [attrDef.column]: rawValue });
+      } else if (attrDef.format) {
+        // Apply format if defined
+        outputRow[attrName] = attrDef.format(rawValue);
+      } else {
+        // Use raw value
+        outputRow[attrName] = rawValue;
+      }
+
+      // Add display name if specified (simplified - would need proper join in production)
+      if (attrDef.displayName) {
+        // For now, we'll use the existing dimension enrichment logic
+        // In a full implementation, this would traverse relationships
+        const relatedTableName = attrDef.displayName.replace(/Name$/, 's');
+        const relatedTable = db.tables[relatedTableName];
+
+        if (relatedTable) {
+          const relatedKey = attrDef.column;
+          const match = relatedTable.find((r: Row) => r[relatedKey] === rawValue);
+          if (match && match.name) {
+            outputRow[attrDef.displayName] = match.name;
+          }
+        }
+      }
+    }
+
+    // Evaluate metrics
+    const metricValues: Row = {};
+    for (const m of metrics) {
+      const numericValue = evaluateMetric(
+        m,
+        db,
+        {} as FactTableRegistry, // Will be deprecated in favor of measures
+        metricRegistry,
+        rowContext,
+        transforms,
+        cache,
+        measureRegistry
+      );
+      const def = metricRegistry[m];
+      metricValues[m] = formatValue(numericValue, def.format);
+    }
+
+    result.push({
+      ...outputRow,
+      ...metricValues,
+    });
+  }
+
+  return result;
+}
+
 /* --------------------------------------------------------------------------
  * BELOW: POC DATA + METRIC REGISTRY + DEMO USAGE
  * You can move this into a separate file in a real project.
@@ -483,9 +755,10 @@ export function runQuery(
 
 /**
  * Example in-memory DB for the POC.
+ * Phase 2: All tables unified under 'tables' property.
  */
 export const demoDb: InMemoryDb = {
-  dimensions: {
+  tables: {
     products: [
       { productId: 1, name: "Widget A" },
       { productId: 2, name: "Widget B" },
@@ -494,8 +767,6 @@ export const demoDb: InMemoryDb = {
       { regionId: "NA", name: "North America" },
       { regionId: "EU", name: "Europe" },
     ],
-  },
-  facts: {
     sales: [
       // 2024
       { year: 2024, month: 1, regionId: "NA", productId: 1, quantity: 7, amount: 700 },
@@ -517,6 +788,160 @@ export const demoDb: InMemoryDb = {
       { year: 2025, regionId: "EU", budgetAmount: 1600 },
     ],
   },
+};
+
+/**
+ * Example table definitions for the POC.
+ * Phase 2: Defines schema and relationships for all tables.
+ */
+export const demoTableDefinitions: TableRegistry = {
+  products: {
+    name: 'products',
+    columns: {
+      productId: { dataType: 'number' },
+      name: { dataType: 'string' }
+    },
+    primaryKey: ['productId']
+  },
+
+  regions: {
+    name: 'regions',
+    columns: {
+      regionId: { dataType: 'string' },
+      name: { dataType: 'string' }
+    },
+    primaryKey: ['regionId']
+  },
+
+  sales: {
+    name: 'sales',
+    columns: {
+      year: { dataType: 'number' },
+      month: { dataType: 'number' },
+      regionId: { dataType: 'string' },
+      productId: { dataType: 'number' },
+      amount: { dataType: 'number' },
+      quantity: { dataType: 'number' }
+    },
+    relationships: [
+      {
+        to: 'regions',
+        from: ['regionId'],
+        toColumns: ['regionId'],
+        type: '1:M'
+      },
+      {
+        to: 'products',
+        from: ['productId'],
+        toColumns: ['productId'],
+        type: '1:M'
+      }
+    ]
+  },
+
+  budget: {
+    name: 'budget',
+    columns: {
+      year: { dataType: 'number' },
+      regionId: { dataType: 'string' },
+      budgetAmount: { dataType: 'number' }
+    },
+    relationships: [
+      {
+        to: 'regions',
+        from: ['regionId'],
+        toColumns: ['regionId'],
+        type: '1:M'
+      }
+    ]
+  }
+};
+
+/**
+ * Example attribute registry for the POC.
+ * Phase 2: Attributes define how to slice/group the data.
+ */
+export const demoAttributes: AttributeRegistry = {
+  year: {
+    name: 'year',
+    table: 'sales',
+    column: 'year',
+    description: 'Year dimension'
+  },
+
+  month: {
+    name: 'month',
+    table: 'sales',
+    column: 'month',
+    description: 'Month dimension'
+  },
+
+  regionId: {
+    name: 'regionId',
+    table: 'sales',
+    column: 'regionId',
+    displayName: 'regionName',  // Auto-join to regions.name
+    description: 'Region identifier'
+  },
+
+  productId: {
+    name: 'productId',
+    table: 'sales',
+    column: 'productId',
+    displayName: 'productName',  // Auto-join to products.name
+    description: 'Product identifier'
+  }
+};
+
+/**
+ * Example measure registry for the POC.
+ * Phase 2: Measures define how to aggregate data.
+ */
+export const demoMeasures: MeasureRegistry = {
+  salesAmount: {
+    name: 'salesAmount',
+    table: 'sales',
+    column: 'amount',
+    aggregation: 'sum',
+    format: 'currency',
+    description: 'Total sales amount'
+  },
+
+  salesQuantity: {
+    name: 'salesQuantity',
+    table: 'sales',
+    column: 'quantity',
+    aggregation: 'sum',
+    format: 'integer',
+    description: 'Total sales quantity'
+  },
+
+  avgOrderSize: {
+    name: 'avgOrderSize',
+    table: 'sales',
+    column: 'amount',
+    aggregation: 'avg',
+    format: 'currency',
+    description: 'Average order size'
+  },
+
+  orderCount: {
+    name: 'orderCount',
+    table: 'sales',
+    column: 'quantity',
+    aggregation: 'count',
+    format: 'integer',
+    description: 'Number of orders'
+  },
+
+  budgetAmount: {
+    name: 'budgetAmount',
+    table: 'budget',
+    column: 'budgetAmount',
+    aggregation: 'sum',
+    format: 'currency',
+    description: 'Total budget amount'
+  }
 };
 
 /**
@@ -612,7 +1037,32 @@ export function addContextTransformMetric(
  * Build demo metrics (you can mirror this pattern in your own project).
  */
 function buildDemoMetrics() {
-  // Simple fact measures
+  // Phase 2: Simple metrics (using measure registry)
+  demoMetrics.revenue = {
+    kind: "simple",
+    name: "revenue",
+    description: "Total revenue from sales",
+    measure: "salesAmount",
+    format: "currency"
+  };
+
+  demoMetrics.quantity = {
+    kind: "simple",
+    name: "quantity",
+    description: "Total quantity sold",
+    measure: "salesQuantity",
+    format: "integer"
+  };
+
+  demoMetrics.budget = {
+    kind: "simple",
+    name: "budget",
+    description: "Total budget amount",
+    measure: "budgetAmount",
+    format: "currency"
+  };
+
+  // Simple fact measures (legacy - using factMeasure)
   demoMetrics.totalSalesAmount = {
     kind: "factMeasure",
     name: "totalSalesAmount",
@@ -779,7 +1229,8 @@ if (typeof require !== "undefined" && typeof module !== "undefined" && require.m
       filters: { year: 2025, month: 2 },
       metrics: metricBundle,
       factForRows: "sales",
-    }
+    },
+    demoMeasures
   );
   // eslint-disable-next-line no-console
   console.table(result1);
@@ -796,7 +1247,8 @@ if (typeof require !== "undefined" && typeof module !== "undefined" && require.m
       filters: { year: 2025, month: 2 },
       metrics: metricBundle,
       factForRows: "sales",
-    }
+    },
+    demoMeasures
   );
   // eslint-disable-next-line no-console
   console.table(result2);
@@ -813,8 +1265,27 @@ if (typeof require !== "undefined" && typeof module !== "undefined" && require.m
       filters: { year: 2025, month: 2, regionId: "NA" },
       metrics: metricBundle,
       factForRows: "sales",
-    }
+    },
+    demoMeasures
   );
   // eslint-disable-next-line no-console
   console.table(result3);
+
+  // Phase 2: New API Demo
+  console.log("\n=== Phase 2 Demo: Using new runQueryV2 with attributes ===");
+  const result4 = runQueryV2(
+    demoDb,
+    demoTableDefinitions,
+    demoAttributes,
+    demoMeasures,
+    demoMetrics,
+    demoTransforms,
+    {
+      attributes: ['regionId', 'productId'],
+      filters: { year: 2025, month: 2 },
+      metrics: ['revenue', 'quantity', 'budget']
+    }
+  );
+  // eslint-disable-next-line no-console
+  console.table(result4);
 }
