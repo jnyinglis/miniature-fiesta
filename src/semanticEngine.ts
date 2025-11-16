@@ -1,74 +1,10 @@
 // semanticEngine.ts
 // POC semantic metrics engine with factMeasure, expression, derived, contextTransform
 //
-// The original version of this file used the `linq` package for fluent,
-// chainable array helpers. Shipping that dependency caused the GH Pages build
-// to fail because the bundler could not resolve modules outside the Vite app
-// root. To keep the ergonomics without the dependency, we ship a tiny
-// RowSequence helper below that implements just the operators we need.
+// This version uses LINQ.js for powerful, composable query operations.
+// LINQ.js provides 100+ operators for filtering, projection, aggregation, and more.
 
-export class RowSequence {
-  private readonly rows: Row[];
-
-  private constructor(rows: Row[]) {
-    this.rows = rows;
-  }
-
-  static from(rows: Row[]): RowSequence {
-    return new RowSequence([...rows]);
-  }
-
-  where(predicate: (row: Row) => boolean): RowSequence {
-    return new RowSequence(this.rows.filter(predicate));
-  }
-
-  sum(selector: (row: Row) => number): number {
-    return this.rows.reduce((total, row) => {
-      const value = Number(selector(row));
-      if (Number.isNaN(value)) return total;
-      return total + value;
-    }, 0);
-  }
-
-  average(selector: (row: Row) => number): number | null {
-    if (this.rows.length === 0) return null;
-    return this.sum(selector) / this.rows.length;
-  }
-
-  count(): number {
-    return this.rows.length;
-  }
-
-  groupBy<TKey extends string, TValue>(
-    keySelector: (row: Row) => TKey,
-    valueSelector: (row: Row) => TValue
-  ) {
-    const groups = new Map<TKey, TValue[]>();
-    this.rows.forEach((row) => {
-      const key = keySelector(row);
-      const existing = groups.get(key);
-      const value = valueSelector(row);
-      if (existing) {
-        existing.push(value);
-      } else {
-        groups.set(key, [value]);
-      }
-    });
-
-    const groupArray = Array.from(groups.entries()).map(([key, values]) => ({
-      key: () => key,
-      toArray: () => [...values],
-    }));
-
-    return {
-      toArray: () => groupArray,
-    };
-  }
-
-  toArray(): Row[] {
-    return [...this.rows];
-  }
-}
+import Enumerable from './linq.js';
 
 /**
  * Basic row type for facts/dimensions.
@@ -178,10 +114,10 @@ export interface ExpressionMetric extends MetricBase {
    */
   grain?: string[];
   /**
-   * Custom aggregator: receives a LINQ sequence over filtered fact rows.
+   * Custom aggregator: receives a LINQ.js enumerable over filtered fact rows.
    * Returns a numeric value or null.
    */
-  expression: (q: RowSequence, db: InMemoryDb, context: FilterContext) => number | null;
+  expression: (rows: Enumerable.IEnumerable<Row>, db: InMemoryDb, context: FilterContext) => number | null;
 }
 
 /**
@@ -286,17 +222,17 @@ export function applyContextToFact(
   rows: Row[],
   context: FilterContext,
   grain: string[]
-): RowSequence {
-  let q = RowSequence.from(rows);
+): Enumerable.IEnumerable<Row> {
+  let query = Enumerable.from(rows);
 
   Object.entries(context || {}).forEach(([key, filter]) => {
     if (filter === undefined || filter === null) return;
     if (!grain.includes(key)) return; // ignore filters this metric doesn't care about
 
-    q = q.where((r: Row) => matchesFilter(r[key], filter));
+    query = query.where((r: Row) => matchesFilter(r[key], filter));
   });
 
-  return q;
+  return query;
 }
 
 /**
@@ -724,9 +660,9 @@ function buildDemoMetrics() {
     description: "Sales amount / quantity over the current context.",
     factTable: "sales",
     format: "currency",
-    expression: (q: any) => {
-      const amount = q.sum((r: Row) => Number(r.amount ?? 0));
-      const qty = q.sum((r: Row) => Number(r.quantity ?? 0));
+    expression: (rows: Enumerable.IEnumerable<Row>) => {
+      const amount = rows.sum((r: Row) => Number(r.amount ?? 0));
+      const qty = rows.sum((r: Row) => Number(r.quantity ?? 0));
       return qty ? amount / qty : null;
     },
   };
