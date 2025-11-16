@@ -1,8 +1,8 @@
 # Semantic Metrics Engine Refactoring Specification
 
-**Version:** 1.1
+**Version:** 2.0
 **Date:** 2025-11-16
-**Status:** Phase 1 Completed
+**Status:** Phase 1 & Phase 2 Completed
 
 ---
 
@@ -11,10 +11,10 @@
 | Phase | Description | Status | Date Completed |
 |-------|-------------|--------|----------------|
 | **Phase 1** | LINQ.js Integration | ✅ **COMPLETED** | 2025-11-16 |
-| **Phase 2a** | Storage Layer (Unified Tables) | ⏳ Pending | - |
-| **Phase 2b** | Semantic Layer (Attributes & Measures) | ⏳ Pending | - |
-| **Phase 2c** | Metric Layer Updates | ⏳ Pending | - |
-| **Phase 2d** | Query Engine Refactor | ⏳ Pending | - |
+| **Phase 2a** | Storage Layer (Unified Tables) | ✅ **COMPLETED** | 2025-11-16 |
+| **Phase 2b** | Semantic Layer (Attributes & Measures) | ✅ **COMPLETED** | 2025-11-16 |
+| **Phase 2c** | Metric Layer Updates | ✅ **COMPLETED** | 2025-11-16 |
+| **Phase 2d** | Query Engine Refactor | ✅ **COMPLETED** | 2025-11-16 |
 | **Phase 3** | Advanced Features | ⏳ Pending | - |
 
 ### Phase 1 Completion Summary
@@ -47,6 +47,63 @@
 - All metric types function correctly (factMeasure, expression, derived, contextTransform)
 - Filter matching, dimension enrichment, and formatting unchanged
 - New capabilities available (join, orderBy, distinct, selectMany, etc.)
+
+### Phase 2 Completion Summary
+
+**Completed Changes:**
+- ✅ **Phase 2a: Storage Layer (Unified Tables)**
+  - Merged `db.dimensions` and `db.facts` into unified `db.tables`
+  - Created `TableDefinition` interface with schema and relationships
+  - Created `TableRegistry` type
+  - Updated all references to use unified table structure
+  - Created demo table definitions with relationships
+
+- ✅ **Phase 2b: Semantic Layer (Attributes & Measures)**
+  - Created `AttributeDefinition` interface for slicing/grouping
+  - Created `MeasureDefinition` interface for aggregations
+  - Created `AttributeRegistry` and `MeasureRegistry` types
+  - Implemented demo attribute registry (year, month, regionId, productId)
+  - Implemented demo measure registry (salesAmount, salesQuantity, budgetAmount, etc.)
+  - Added support for display name resolution in attributes
+
+- ✅ **Phase 2c: Metric Layer Updates**
+  - Added `SimpleMetric` type for wrapping measures
+  - Updated `MetricDefinition` union to include SimpleMetric
+  - Updated `evaluateMetric` to resolve and evaluate simple metrics
+  - Added `measureRegistry` parameter to all evaluation functions
+  - Created demo simple metrics (revenue, quantity, budget)
+  - Maintained backward compatibility with existing metric types
+
+- ✅ **Phase 2d: Query Engine Refactor**
+  - Created new `RunQueryOptionsV2` interface using attributes instead of rows
+  - Implemented `runQueryV2` function with semantic layer support
+  - Automatic table determination based on attributes
+  - Simplified query API (no more `factForRows` required)
+  - Enhanced display name resolution via relationships
+  - Maintained backward compatibility with original `runQuery` function
+
+**Files Modified:**
+- `src/semanticEngine.ts` - Implemented all Phase 2 changes
+
+**Files Created:**
+- None (all changes integrated into existing files)
+
+**Benefits Realized:**
+- **Flexibility**: Same column can be attribute, measure, or both
+- **Clarity**: Clear separation between storage, semantics, and business logic
+- **Simplified API**: New query API requires fewer parameters
+- **MicroStrategy Alignment**: Follows industry-standard semantic layer model
+- **Backward Compatibility**: Original API still works for existing code
+- **Type Safety**: Strongly typed registries for attributes and measures
+
+**Validation:**
+- All existing tests pass with backward-compatible API
+- New Phase 2 tests validate unified tables, semantic layer, simple metrics, and runQueryV2
+- Demo showcases both old and new API working side-by-side
+- No breaking changes for existing code using original API
+
+**What's Next:**
+- Phase 3: Advanced features (auto-join resolution, derived attributes, cross-table metrics, query plan visualization)
 
 ---
 
