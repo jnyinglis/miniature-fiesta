@@ -60,41 +60,6 @@ export interface InMemoryDb {
   tables: Record<string, Row[]>;
 }
 
-/**
- * Fact-table metadata: describes the grain + numeric fact columns (measures).
- */
-export interface FactMeasureDefinition {
-  /** Column name in the raw fact rows */
-  column: string;
-  /** Default aggregation (e.g., "sum", "avg", "count") */
-  defaultAgg: "sum" | "avg" | "count";
-  /** Optional default format (currency, integer, percent, etc.) */
-  format?: string;
-  /** Optional description */
-  description?: string;
-}
-
-export interface FactTableDefinition {
-  /** Native grain of the fact table (dimension keys present in rows) */
-  grain: string[];
-  /** Measure definitions (fact columns) */
-  measures: Record<string, FactMeasureDefinition>;
-}
-
-export type FactTableRegistry = Record<string, FactTableDefinition>;
-
-/**
- * Dimension config for label enrichment.
- * Maps a dimension key (e.g., "regionId") to its lookup table and label.
- */
-export interface DimensionConfigEntry {
-  table: string;      // "regions"
-  key: string;        // "regionId"
-  labelProp: string;  // "name"
-  labelAlias: string; // "regionName"
-}
-
-export type DimensionConfig = Record<string, DimensionConfigEntry>;
 
 /**
  * Phase 2: Semantic Layer - Attribute Definitions
@@ -160,21 +125,6 @@ export interface SimpleMetric extends MetricBase {
 }
 
 /**
- * Metric evaluated directly from a single fact column with a simple aggregation.
- */
-export interface FactMeasureMetric extends MetricBase {
-  kind: "factMeasure";
-  factTable: string;
-  factColumn: string; // key into FactTableDefinition.measures
-  agg?: "sum" | "avg" | "count"; // default from fact column if omitted
-  /**
-   * Metric grain: which dimensions from the filter context affect this metric.
-   * If omitted, defaults to the fact table's grain.
-   */
-  grain?: string[];
-}
-
-/**
  * Metric evaluated with a custom expression over the filtered fact rows.
  */
 export interface ExpressionMetric extends MetricBase {
@@ -218,11 +168,9 @@ export interface ContextTransformMetric extends MetricBase {
 
 /**
  * Union of all metric definitions.
- * Phase 2: Added SimpleMetric.
  */
 export type MetricDefinition =
   | SimpleMetric
-  | FactMeasureMetric
   | ExpressionMetric
   | DerivedMetric
   | ContextTransformMetric;
@@ -320,29 +268,6 @@ export function pick(obj: Row, keys: string[]): Row {
   return out;
 }
 
-/**
- * Enrich dimension keys with their label fields, using dimensionConfig.
- * Phase 2: Updated to use unified tables.
- */
-export function enrichDimensions(
-  keyObj: Row,
-  db: InMemoryDb,
-  dimensionConfig: DimensionConfig
-): Row {
-  const result: Row = { ...keyObj };
-  for (const [dimKey, cfg] of Object.entries(dimensionConfig)) {
-    if (keyObj[dimKey] == null) continue;
-
-    const dimTable = db.tables[cfg.table];
-    if (!dimTable) continue;
-
-    const match = dimTable.find((d) => d[cfg.key] === keyObj[dimKey]);
-    if (match) {
-      result[cfg.labelAlias] = match[cfg.labelProp];
-    }
-  }
-  return result;
-}
 
 /**
  * Metric evaluation engine
@@ -354,12 +279,10 @@ function cacheKey(metricName: string, context: FilterContext): string {
 
 /**
  * Evaluate a single metric with context and cache.
- * Phase 2: Added measureRegistry parameter for SimpleMetric support.
  */
 export function evaluateMetric(
   metricName: string,
   db: InMemoryDb,
-  factTables: FactTableRegistry,
   metricRegistry: MetricRegistry,
   context: FilterContext,
   transforms: ContextTransformsRegistry,
@@ -425,44 +348,12 @@ export function evaluateMetric(
       }
     }
 
-  } else if (def.kind === "factMeasure") {
-    const factDef = factTables[def.factTable];
-    if (!factDef) throw new Error(`Unknown fact table: ${def.factTable}`);
-
-    const rows = db.tables[def.factTable];
-    if (!rows) throw new Error(`Missing rows for fact table: ${def.factTable}`);
-
-    const grain = def.grain ?? factDef.grain;
-    const q = applyContextToFact(rows, context, grain);
-
-    const factMeasureDef = factDef.measures[def.factColumn];
-    if (!factMeasureDef) {
-      throw new Error(`Unknown fact column '${def.factColumn}' for table '${def.factTable}'`);
-    }
-    const col = factMeasureDef.column;
-    const agg = def.agg ?? factMeasureDef.defaultAgg;
-
-    switch (agg) {
-      case "sum":
-        value = q.sum((r: Row) => Number(r[col] ?? 0));
-        break;
-      case "avg":
-        value = q.average((r: Row) => Number(r[col] ?? 0));
-        break;
-      case "count":
-        value = q.count();
-        break;
-      default:
-        throw new Error(`Unsupported aggregation: ${agg}`);
-    }
   } else if (def.kind === "expression") {
-    const factDef = factTables[def.factTable];
-    if (!factDef) throw new Error(`Unknown fact table: ${def.factTable}`);
-
     const rows = db.tables[def.factTable];
     if (!rows) throw new Error(`Missing rows for fact table: ${def.factTable}`);
 
-    const grain = def.grain ?? factDef.grain;
+    // Use metric grain if specified, otherwise use all table columns as grain
+    const grain = def.grain ?? Object.keys(rows[0] || {});
     const q = applyContextToFact(rows, context, grain);
     value = def.expression(q, db, context);
 
@@ -472,7 +363,6 @@ export function evaluateMetric(
       depValues[dep] = evaluateMetric(
         dep,
         db,
-        factTables,
         metricRegistry,
         context,
         transforms,
@@ -491,7 +381,6 @@ export function evaluateMetric(
     value = evaluateMetric(
       def.baseMeasure,
       db,
-      factTables,
       metricRegistry,
       transformedContext,
       transforms,
@@ -509,12 +398,10 @@ export function evaluateMetric(
 
 /**
  * Evaluate multiple metrics together, sharing a cache.
- * Phase 2: Added measureRegistry parameter.
  */
 export function evaluateMetrics(
   metricNames: string[],
   db: InMemoryDb,
-  factTables: FactTableRegistry,
   metricRegistry: MetricRegistry,
   context: FilterContext,
   transforms: ContextTransformsRegistry,
@@ -526,7 +413,6 @@ export function evaluateMetrics(
     results[m] = evaluateMetric(
       m,
       db,
-      factTables,
       metricRegistry,
       context,
       transforms,
@@ -538,96 +424,26 @@ export function evaluateMetrics(
 }
 
 /**
- * Build a dimensioned result set: rows by dimension keys + metrics.
+ * Query options using attributes from the semantic layer.
  */
 export interface RunQueryOptions {
-  rows: string[];         // dimension keys for row axis, e.g. ["regionId", "productId"]
-  filters?: FilterContext;
-  metrics: string[];      // metric IDs
-  factForRows: string;    // fact table used to find distinct row combinations
-}
-
-/**
- * Phase 2: New query options using attributes instead of rows.
- */
-export interface RunQueryOptionsV2 {
   attributes: string[];   // Attribute names (can come from any table)
   filters?: FilterContext;
   metrics: string[];      // Metric IDs
 }
 
-export function runQuery(
-  db: InMemoryDb,
-  factTables: FactTableRegistry,
-  metricRegistry: MetricRegistry,
-  transforms: ContextTransformsRegistry,
-  dimensionConfig: DimensionConfig,
-  options: RunQueryOptions,
-  measureRegistry?: MeasureRegistry
-): Row[] {
-  const { rows: rowDims, filters = {}, metrics, factForRows } = options;
-
-  const factRows = db.tables[factForRows];
-  if (!factRows) throw new Error(`Unknown fact table: ${factForRows}`);
-
-  const factGrain = Object.keys(factRows[0] || {});
-  const filtered = applyContextToFact(factRows, filters, factGrain);
-
-  const groups = filtered
-    .groupBy(
-      (r: Row) => JSON.stringify(pick(r, rowDims)),
-      (r: Row) => r
-    )
-    .toArray();
-
-  const cache = new Map<string, number | null>();
-  const result: Row[] = [];
-
-  for (const g of groups) {
-    const keyObj: Row = JSON.parse(g.key());
-    const rowContext: FilterContext = {
-      ...filters,
-      ...keyObj,
-    };
-
-    const metricValues: Row = {};
-    for (const m of metrics) {
-      const numericValue = evaluateMetric(
-        m,
-        db,
-        factTables,
-        metricRegistry,
-        rowContext,
-        transforms,
-        cache,
-        measureRegistry
-      );
-      const def = metricRegistry[m];
-      metricValues[m] = formatValue(numericValue, def.format);
-    }
-
-    const dimPart = enrichDimensions(keyObj, db, dimensionConfig);
-    result.push({
-      ...dimPart,
-      ...metricValues,
-    });
-  }
-
-  return result;
-}
-
 /**
- * Phase 2: Enhanced query engine using the semantic layer.
- * This version uses attributes and measures instead of direct table references.
+ * Enhanced query engine using the semantic layer.
+ * Uses attributes and measures instead of direct table references.
  */
-export function runQueryV2(
+export function runQuery(
   db: InMemoryDb,
   tableRegistry: TableRegistry,
   attributeRegistry: AttributeRegistry,
   measureRegistry: MeasureRegistry,
   metricRegistry: MetricRegistry,
   transforms: ContextTransformsRegistry,
-  options: RunQueryOptionsV2
+  options: RunQueryOptions
 ): Row[] {
   const { attributes: attrNames, filters = {}, metrics } = options;
 
@@ -728,7 +544,6 @@ export function runQueryV2(
       const numericValue = evaluateMetric(
         m,
         db,
-        {} as FactTableRegistry, // Will be deprecated in favor of measures
         metricRegistry,
         rowContext,
         transforms,
@@ -944,54 +759,6 @@ export const demoMeasures: MeasureRegistry = {
   }
 };
 
-/**
- * Example fact-table metadata.
- */
-export const demoFactTables: FactTableRegistry = {
-  sales: {
-    grain: ["year", "month", "regionId", "productId"],
-    measures: {
-      amount: {
-        column: "amount",
-        defaultAgg: "sum",
-        format: "currency",
-      },
-      quantity: {
-        column: "quantity",
-        defaultAgg: "sum",
-        format: "integer",
-      },
-    },
-  },
-  budget: {
-    grain: ["year", "regionId"],
-    measures: {
-      budgetAmount: {
-        column: "budgetAmount",
-        defaultAgg: "sum",
-        format: "currency",
-      },
-    },
-  },
-};
-
-/**
- * Example dimension config for label enrichment.
- */
-export const demoDimensionConfig: DimensionConfig = {
-  regionId: {
-    table: "regions",
-    key: "regionId",
-    labelProp: "name",
-    labelAlias: "regionName",
-  },
-  productId: {
-    table: "products",
-    key: "productId",
-    labelProp: "name",
-    labelAlias: "productName",
-  },
-};
 
 /**
  * Example context transforms (time intelligence).
@@ -1016,7 +783,7 @@ export const demoTransforms: ContextTransformsRegistry = {
 };
 
 /**
- * Example metric registry implementing factMeasure, expression, derived, contextTransform.
+ * Example metric registry implementing simple, expression, derived, and contextTransform metrics.
  */
 export const demoMetrics: MetricRegistry = {};
 
@@ -1062,47 +829,6 @@ function buildDemoMetrics() {
     format: "currency"
   };
 
-  // Simple fact measures (legacy - using factMeasure)
-  demoMetrics.totalSalesAmount = {
-    kind: "factMeasure",
-    name: "totalSalesAmount",
-    description: "Sum of sales amount over the current context.",
-    factTable: "sales",
-    factColumn: "amount",
-    format: "currency",
-    // grain omitted → defaults to factTables.sales.grain
-  };
-
-  demoMetrics.totalSalesQuantity = {
-    kind: "factMeasure",
-    name: "totalSalesQuantity",
-    description: "Sum of sales quantity.",
-    factTable: "sales",
-    factColumn: "quantity",
-    format: "integer",
-  };
-
-  demoMetrics.totalBudget = {
-    kind: "factMeasure",
-    name: "totalBudget",
-    description: "Total budget at (year, region) grain; ignores product/month filters.",
-    factTable: "budget",
-    factColumn: "budgetAmount",
-    format: "currency",
-    // grain omitted → defaults to factTables.budget.grain
-  };
-
-  // Fact measure with coarser metric grain (like MicroStrategy level metric)
-  demoMetrics.salesAmountYearRegion = {
-    kind: "factMeasure",
-    name: "salesAmountYearRegion",
-    description: "Sales aggregated at (year, region) level; ignores month and product filters.",
-    factTable: "sales",
-    factColumn: "amount",
-    format: "currency",
-    grain: ["year", "regionId"],
-  };
-
   // Expression metric: price per unit
   demoMetrics.pricePerUnit = {
     kind: "expression",
@@ -1122,11 +848,11 @@ function buildDemoMetrics() {
     kind: "derived",
     name: "salesVsBudgetPct",
     description: "Total sales / total budget.",
-    dependencies: ["totalSalesAmount", "totalBudget"],
+    dependencies: ["revenue", "budget"],
     format: "percent",
-    evalFromDeps: ({ totalSalesAmount, totalBudget }) => {
-      const s = totalSalesAmount ?? 0;
-      const b = totalBudget ?? 0;
+    evalFromDeps: ({ revenue, budget }) => {
+      const s = revenue ?? 0;
+      const b = budget ?? 0;
       if (!b) return null;
       return (s / b) * 100;
     },
@@ -1135,7 +861,7 @@ function buildDemoMetrics() {
   // Time-int metrics (context-transform)
   addContextTransformMetric(demoMetrics, {
     name: "salesAmountYTD",
-    baseMeasure: "totalSalesAmount",
+    baseMeasure: "revenue",
     transform: "ytd",
     description: "YTD of total sales amount.",
     format: "currency",
@@ -1143,7 +869,7 @@ function buildDemoMetrics() {
 
   addContextTransformMetric(demoMetrics, {
     name: "salesAmountLastYear",
-    baseMeasure: "totalSalesAmount",
+    baseMeasure: "revenue",
     transform: "lastYear",
     description: "Total sales amount for previous year.",
     format: "currency",
@@ -1151,7 +877,7 @@ function buildDemoMetrics() {
 
   addContextTransformMetric(demoMetrics, {
     name: "salesAmountYTDLastYear",
-    baseMeasure: "totalSalesAmount",
+    baseMeasure: "revenue",
     transform: "ytdLastYear",
     description: "YTD of total sales amount in previous year.",
     format: "currency",
@@ -1159,7 +885,7 @@ function buildDemoMetrics() {
 
   addContextTransformMetric(demoMetrics, {
     name: "budgetYTD",
-    baseMeasure: "totalBudget",
+    baseMeasure: "budget",
     transform: "ytd",
     description: "YTD of total budget (may match full year if budget is annual).",
     format: "currency",
@@ -1167,7 +893,7 @@ function buildDemoMetrics() {
 
   addContextTransformMetric(demoMetrics, {
     name: "budgetLastYear",
-    baseMeasure: "totalBudget",
+    baseMeasure: "budget",
     transform: "lastYear",
     description: "Total budget in previous year.",
     format: "currency",
@@ -1197,16 +923,15 @@ buildDemoMetrics();
  *
  * This is just to illustrate. In a real application you'd likely:
  * - import the library parts
- * - define your own db, factTables, dimensionConfig, metrics
+ * - define your own db, attributes, measures, metrics
  * - call runQuery() from your UI / API layer
  */
 
 if (typeof require !== "undefined" && typeof module !== "undefined" && require.main === module) {
   const metricBundle = [
-    "totalSalesAmount",
-    "totalSalesQuantity",
-    "totalBudget",
-    "salesAmountYearRegion",
+    "revenue",
+    "quantity",
+    "budget",
     "pricePerUnit",
     "salesVsBudgetPct",
     "salesAmountYTD",
@@ -1220,61 +945,6 @@ if (typeof require !== "undefined" && typeof module !== "undefined" && require.m
   console.log("\n=== Demo: 2025-02, Region x Product ===");
   const result1 = runQuery(
     demoDb,
-    demoFactTables,
-    demoMetrics,
-    demoTransforms,
-    demoDimensionConfig,
-    {
-      rows: ["regionId", "productId"],
-      filters: { year: 2025, month: 2 },
-      metrics: metricBundle,
-      factForRows: "sales",
-    },
-    demoMeasures
-  );
-  // eslint-disable-next-line no-console
-  console.table(result1);
-
-  console.log("\n=== Demo: 2025-02, Region only ===");
-  const result2 = runQuery(
-    demoDb,
-    demoFactTables,
-    demoMetrics,
-    demoTransforms,
-    demoDimensionConfig,
-    {
-      rows: ["regionId"],
-      filters: { year: 2025, month: 2 },
-      metrics: metricBundle,
-      factForRows: "sales",
-    },
-    demoMeasures
-  );
-  // eslint-disable-next-line no-console
-  console.table(result2);
-
-  console.log("\n=== Demo: 2025-02, Region=NA, by Product ===");
-  const result3 = runQuery(
-    demoDb,
-    demoFactTables,
-    demoMetrics,
-    demoTransforms,
-    demoDimensionConfig,
-    {
-      rows: ["productId"],
-      filters: { year: 2025, month: 2, regionId: "NA" },
-      metrics: metricBundle,
-      factForRows: "sales",
-    },
-    demoMeasures
-  );
-  // eslint-disable-next-line no-console
-  console.table(result3);
-
-  // Phase 2: New API Demo
-  console.log("\n=== Phase 2 Demo: Using new runQueryV2 with attributes ===");
-  const result4 = runQueryV2(
-    demoDb,
     demoTableDefinitions,
     demoAttributes,
     demoMeasures,
@@ -1283,9 +953,43 @@ if (typeof require !== "undefined" && typeof module !== "undefined" && require.m
     {
       attributes: ['regionId', 'productId'],
       filters: { year: 2025, month: 2 },
-      metrics: ['revenue', 'quantity', 'budget']
+      metrics: metricBundle
     }
   );
   // eslint-disable-next-line no-console
-  console.table(result4);
+  console.table(result1);
+
+  console.log("\n=== Demo: 2025-02, Region only ===");
+  const result2 = runQuery(
+    demoDb,
+    demoTableDefinitions,
+    demoAttributes,
+    demoMeasures,
+    demoMetrics,
+    demoTransforms,
+    {
+      attributes: ['regionId'],
+      filters: { year: 2025, month: 2 },
+      metrics: metricBundle
+    }
+  );
+  // eslint-disable-next-line no-console
+  console.table(result2);
+
+  console.log("\n=== Demo: 2025-02, Region=NA, by Product ===");
+  const result3 = runQuery(
+    demoDb,
+    demoTableDefinitions,
+    demoAttributes,
+    demoMeasures,
+    demoMetrics,
+    demoTransforms,
+    {
+      attributes: ['productId'],
+      filters: { year: 2025, month: 2, regionId: "NA" },
+      metrics: metricBundle
+    }
+  );
+  // eslint-disable-next-line no-console
+  console.table(result3);
 }

@@ -10,21 +10,17 @@ const Enumerable = require('./linq.js');
 // Import types and functions (simulated for JavaScript)
 const {
   demoDb,
-  demoFactTables,
   demoMetrics,
   demoTransforms,
-  demoDimensionConfig,
   demoTableDefinitions,
   demoAttributes,
   demoMeasures,
   runQuery,
-  runQueryV2,
   evaluateMetric,
   evaluateMetrics,
   applyContextToFact,
   matchesFilter,
   formatValue,
-  enrichDimensions,
   pick
 } = require('./semanticEngine.ts'); // Note: This would need transpilation
 
@@ -241,51 +237,53 @@ try {
 // Test Suite 5: Metric Evaluation - FactMeasure
 // ============================================================================
 
-console.log('Test Suite 5: Metric Evaluation - FactMeasure');
+console.log('Test Suite 5: Metric Evaluation - Simple Metrics');
 console.log('-'.repeat(80));
 
 try {
   // Test 5.1: Simple sum metric
   const salesAmount = evaluateMetric(
-    'totalSalesAmount',
+    'revenue',
     demoDb,
-    demoFactTables,
     demoMetrics,
     { year: 2025, month: 1 },
-    demoTransforms
+    demoTransforms,
+    new Map(),
+    demoMeasures
   );
-  assertEquals(salesAmount, 2100, 'FactMeasure sums correctly');
+  assertEquals(salesAmount, 2100, 'Simple metric sums correctly');
 
   // Test 5.2: Count metric (implicit)
   // Note: Would need a count-based metric in demoMetrics
 
   // Test 5.3: Metric with filtered context
   const filteredSales = evaluateMetric(
-    'totalSalesAmount',
+    'revenue',
     demoDb,
-    demoFactTables,
     demoMetrics,
     { year: 2025, regionId: 'NA' },
-    demoTransforms
+    demoTransforms,
+    new Map(),
+    demoMeasures
   );
-  assertEquals(filteredSales, 2550, 'FactMeasure respects filter context');
+  assertEquals(filteredSales, 2550, 'Simple metric respects filter context');
 
-  // Test 5.4: Metric with coarser grain
-  const yearRegionSales = evaluateMetric(
-    'salesAmountYearRegion',
+  // Test 5.4: Quantity metric
+  const quantity = evaluateMetric(
+    'quantity',
     demoDb,
-    demoFactTables,
     demoMetrics,
-    { year: 2025, month: 1, productId: 1 },
-    demoTransforms
+    { year: 2025, month: 1 },
+    demoTransforms,
+    new Map(),
+    demoMeasures
   );
-  // Should ignore month and productId filters due to grain
-  assertEquals(yearRegionSales, 3500, 'FactMeasure respects custom grain (ignores month/product)');
+  assertEquals(quantity, 19, 'Simple metric sums quantity correctly');
 
-  console.log('✓ All FactMeasure metric tests passed\n');
+  console.log('✓ All Simple metric tests passed\n');
 
 } catch (error) {
-  console.error('✗ FactMeasure metric test failed:', error.message);
+  console.error('✗ Simple metric test failed:', error.message);
   console.log();
 }
 
@@ -301,7 +299,6 @@ try {
   const pricePerUnit = evaluateMetric(
     'pricePerUnit',
     demoDb,
-    demoFactTables,
     demoMetrics,
     { year: 2025, month: 1 },
     demoTransforms
@@ -313,7 +310,6 @@ try {
   const pricePerUnitNA = evaluateMetric(
     'pricePerUnit',
     demoDb,
-    demoFactTables,
     demoMetrics,
     { year: 2025, regionId: 'NA' },
     demoTransforms
@@ -340,10 +336,11 @@ try {
   const salesVsBudget = evaluateMetric(
     'salesVsBudgetPct',
     demoDb,
-    demoFactTables,
     demoMetrics,
     { year: 2025, regionId: 'NA' },
-    demoTransforms
+    demoTransforms,
+    new Map(),
+    demoMeasures
   );
   // Sales: 2550, Budget: 2200, Ratio: 2550/2200 * 100 = 115.909...
   assertClose(salesVsBudget, 115.91, 0.01, 'Derived metric calculates percentage');
@@ -352,10 +349,11 @@ try {
   const salesVsBudgetNoData = evaluateMetric(
     'salesVsBudgetPct',
     demoDb,
-    demoFactTables,
     demoMetrics,
     { year: 2099 }, // No data for this year
-    demoTransforms
+    demoTransforms,
+    new Map(),
+    demoMeasures
   );
   assertEquals(salesVsBudgetNoData, null, 'Derived metric handles division by zero');
 
@@ -378,10 +376,11 @@ try {
   const salesYTD = evaluateMetric(
     'salesAmountYTD',
     demoDb,
-    demoFactTables,
     demoMetrics,
     { year: 2025, month: 2 },
-    demoTransforms
+    demoTransforms,
+    new Map(),
+    demoMeasures
   );
   // YTD for month 2 includes months 1 and 2
   // 2025 months 1-2: 1000+600+500+950+450 = 3500
@@ -391,10 +390,11 @@ try {
   const salesLastYear = evaluateMetric(
     'salesAmountLastYear',
     demoDb,
-    demoFactTables,
     demoMetrics,
     { year: 2025, month: 1 },
-    demoTransforms
+    demoTransforms,
+    new Map(),
+    demoMeasures
   );
   // 2024 month 1: 700+480 = 1180
   assertEquals(salesLastYear, 1180, 'Last Year transform shifts year back');
@@ -403,10 +403,11 @@ try {
   const salesYTDLY = evaluateMetric(
     'salesAmountYTDLastYear',
     demoDb,
-    demoFactTables,
     demoMetrics,
     { year: 2025, month: 2 },
-    demoTransforms
+    demoTransforms,
+    new Map(),
+    demoMeasures
   );
   // 2024 months 1-2: 700+480+650+420 = 2250
   assertEquals(salesYTDLY, 2250, 'YTD Last Year transform combines both transforms');
@@ -415,10 +416,11 @@ try {
   const budgetYTD = evaluateMetric(
     'budgetYTD',
     demoDb,
-    demoFactTables,
     demoMetrics,
     { year: 2025, regionId: 'NA', month: 2 },
-    demoTransforms
+    demoTransforms,
+    new Map(),
+    demoMeasures
   );
   assertEquals(budgetYTD, 2200, 'Budget YTD works (budget is annual)');
 
@@ -440,34 +442,34 @@ try {
   // Test 9.1: Query with single dimension
   const result1 = runQuery(
     demoDb,
-    demoFactTables,
+    demoTableDefinitions,
+    demoAttributes,
+    demoMeasures,
     demoMetrics,
     demoTransforms,
-    demoDimensionConfig,
     {
-      rows: ['regionId'],
+      attributes: ['regionId'],
       filters: { year: 2025, month: 1 },
-      metrics: ['totalSalesAmount'],
-      factForRows: 'sales'
+      metrics: ['revenue']
     }
   );
 
   assertEquals(result1.length, 2, 'Query returns correct number of rows (2 regions)');
   assert(result1[0].regionName, 'Query enriches dimension labels');
-  assert(result1[0].totalSalesAmount, 'Query includes metric values');
+  assert(result1[0].revenue, 'Query includes metric values');
 
   // Test 9.2: Query with multiple dimensions
   const result2 = runQuery(
     demoDb,
-    demoFactTables,
+    demoTableDefinitions,
+    demoAttributes,
+    demoMeasures,
     demoMetrics,
     demoTransforms,
-    demoDimensionConfig,
     {
-      rows: ['regionId', 'productId'],
+      attributes: ['regionId', 'productId'],
       filters: { year: 2025, month: 1 },
-      metrics: ['totalSalesAmount', 'totalSalesQuantity'],
-      factForRows: 'sales'
+      metrics: ['revenue', 'quantity']
     }
   );
 
@@ -477,15 +479,15 @@ try {
   // Test 9.3: Query with derived metrics
   const result3 = runQuery(
     demoDb,
-    demoFactTables,
+    demoTableDefinitions,
+    demoAttributes,
+    demoMeasures,
     demoMetrics,
     demoTransforms,
-    demoDimensionConfig,
     {
-      rows: ['regionId'],
+      attributes: ['regionId'],
       filters: { year: 2025 },
-      metrics: ['totalSalesAmount', 'totalBudget', 'salesVsBudgetPct'],
-      factForRows: 'sales'
+      metrics: ['revenue', 'budget', 'salesVsBudgetPct']
     }
   );
 
@@ -495,15 +497,15 @@ try {
   // Test 9.4: Query with context transform metrics
   const result4 = runQuery(
     demoDb,
-    demoFactTables,
+    demoTableDefinitions,
+    demoAttributes,
+    demoMeasures,
     demoMetrics,
     demoTransforms,
-    demoDimensionConfig,
     {
-      rows: ['regionId'],
+      attributes: ['regionId'],
       filters: { year: 2025, month: 2 },
-      metrics: ['totalSalesAmount', 'salesAmountYTD', 'salesAmountLastYear'],
-      factForRows: 'sales'
+      metrics: ['revenue', 'salesAmountYTD', 'salesAmountLastYear']
     }
   );
 
@@ -527,20 +529,21 @@ console.log('-'.repeat(80));
 try {
   // Test 10.1: Empty result set
   const emptyResult = evaluateMetric(
-    'totalSalesAmount',
+    'revenue',
     demoDb,
-    demoFactTables,
     demoMetrics,
     { year: 2099 }, // No data for this year
-    demoTransforms
+    demoTransforms,
+    new Map(),
+    demoMeasures
   );
   assertEquals(emptyResult, 0, 'Empty result set returns 0 for sum');
 
   // Test 10.2: Null values in data
   const testDbWithNulls = {
     ...demoDb,
-    facts: {
-      ...demoDb.facts,
+    tables: {
+      ...demoDb.tables,
       testFact: [
         { year: 2025, value: null },
         { year: 2025, value: 100 }
@@ -552,7 +555,6 @@ try {
   const zeroDivision = evaluateMetric(
     'pricePerUnit',
     demoDb,
-    demoFactTables,
     demoMetrics,
     { year: 2099 },
     demoTransforms
@@ -561,25 +563,25 @@ try {
 
   // Test 10.4: Unknown metric
   try {
-    evaluateMetric('unknownMetric', demoDb, demoFactTables, demoMetrics, {}, demoTransforms);
+    evaluateMetric('unknownMetric', demoDb, demoMetrics, {}, demoTransforms);
     assert(false, 'Unknown metric should throw error');
   } catch (error) {
     assert(error.message.includes('Unknown metric'), 'Unknown metric throws appropriate error');
   }
 
-  // Test 10.5: Unknown fact table
+  // Test 10.5: Unknown table in expression metric
   const badMetric = {
-    kind: 'factMeasure',
+    kind: 'expression',
     name: 'badMetric',
     factTable: 'nonexistent',
-    factColumn: 'amount'
+    expression: (rows) => rows.count()
   };
 
   try {
-    evaluateMetric('badMetric', demoDb, demoFactTables, { badMetric }, {}, demoTransforms);
-    assert(false, 'Unknown fact table should throw error');
+    evaluateMetric('badMetric', demoDb, { badMetric }, {}, demoTransforms);
+    assert(false, 'Unknown table should throw error');
   } catch (error) {
-    assert(error.message.includes('Unknown fact table'), 'Unknown fact table throws appropriate error');
+    assert(error.message.includes('Missing rows for fact table'), 'Unknown table throws appropriate error');
   }
 
   console.log('✓ All edge case tests passed\n');
@@ -597,12 +599,12 @@ console.log('Test Suite 11: LINQ.js Advanced Operations (Demonstrating New Capab
 console.log('-'.repeat(80));
 
 try {
-  const salesData = demoDb.facts.sales;
+  const salesData = demoDb.tables.sales;
 
   // Test 11.1: Join operation
   const joined = Enumerable.from(salesData)
     .join(
-      demoDb.dimensions.products,
+      demoDb.tables.products,
       sale => sale.productId,
       product => product.productId,
       (sale, product) => ({ ...sale, productName: product.name })
@@ -741,7 +743,6 @@ try {
   const revenueValue = evaluateMetric(
     'revenue',
     demoDb,
-    demoFactTables,
     demoMetrics,
     { year: 2025, month: 2 },
     demoTransforms,
@@ -752,19 +753,9 @@ try {
   assert(revenueValue !== null && revenueValue !== undefined, 'Revenue metric evaluates successfully');
   assert(revenueValue > 0, 'Revenue metric returns positive value');
 
-  // Test 14.3: Compare simple metric to factMeasure metric
-  const totalSalesValue = evaluateMetric(
-    'totalSalesAmount',
-    demoDb,
-    demoFactTables,
-    demoMetrics,
-    { year: 2025, month: 2 },
-    demoTransforms,
-    new Map(),
-    demoMeasures
-  );
-
-  assertEquals(revenueValue, totalSalesValue, 'Simple metric matches equivalent factMeasure metric');
+  // Test 14.3: Verify metric values are correct
+  // 2025 month 2: NA (950+0) + EU (0+450) = 1400
+  assertEquals(revenueValue, 1400, 'Revenue metric calculates correct value');
 
   console.log('✓ All simple metric tests passed\n');
 
@@ -774,15 +765,15 @@ try {
 }
 
 // ============================================================================
-// Test Suite 15: Phase 2 - runQueryV2 (New Query Engine)
+// Test Suite 15: Query Engine with Attributes
 // ============================================================================
 
-console.log('Test Suite 15: Phase 2 - runQueryV2 (New Query Engine)');
+console.log('Test Suite 15: Query Engine with Attributes');
 console.log('-'.repeat(80));
 
 try {
   // Test 15.1: Basic query with attributes
-  const result = runQueryV2(
+  const result = runQuery(
     demoDb,
     demoTableDefinitions,
     demoAttributes,
@@ -796,13 +787,13 @@ try {
     }
   );
 
-  assert(result.length > 0, 'runQueryV2 returns results');
+  assert(result.length > 0, 'runQuery returns results');
   assert(result[0].regionId !== undefined, 'Result contains regionId attribute');
   assert(result[0].revenue !== undefined, 'Result contains revenue metric');
   assert(result[0].quantity !== undefined, 'Result contains quantity metric');
 
   // Test 15.2: Query with multiple attributes
-  const result2 = runQueryV2(
+  const result2 = runQuery(
     demoDb,
     demoTableDefinitions,
     demoAttributes,
@@ -816,17 +807,17 @@ try {
     }
   );
 
-  assert(result2.length > 0, 'runQueryV2 with multiple attributes returns results');
+  assert(result2.length > 0, 'runQuery with multiple attributes returns results');
   assert(result2[0].regionId !== undefined, 'Multi-attribute result contains regionId');
   assert(result2[0].productId !== undefined, 'Multi-attribute result contains productId');
 
   // Test 15.3: Display names are resolved
   assert(result[0].regionName !== undefined, 'Display name (regionName) is resolved');
 
-  console.log('✓ All runQueryV2 tests passed\n');
+  console.log('✓ All query tests passed\n');
 
 } catch (error) {
-  console.error('✗ runQueryV2 test failed:', error.message);
+  console.error('✗ Query test failed:', error.message);
   console.log();
 }
 

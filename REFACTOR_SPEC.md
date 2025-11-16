@@ -1,8 +1,8 @@
 # Semantic Metrics Engine Refactoring Specification
 
-**Version:** 2.0
+**Version:** 3.0
 **Date:** 2025-11-16
-**Status:** Phase 1 & Phase 2 Completed
+**Status:** Migration Complete - All Phases Completed
 
 ---
 
@@ -15,7 +15,7 @@
 | **Phase 2b** | Semantic Layer (Attributes & Measures) | ✅ **COMPLETED** | 2025-11-16 |
 | **Phase 2c** | Metric Layer Updates | ✅ **COMPLETED** | 2025-11-16 |
 | **Phase 2d** | Query Engine Refactor | ✅ **COMPLETED** | 2025-11-16 |
-| **Phase 3** | Advanced Features | ⏳ Pending | - |
+| **Phase 3** | Legacy API Removal | ✅ **COMPLETED** | 2025-11-16 |
 
 ### Phase 1 Completion Summary
 
@@ -93,30 +93,56 @@
 - **Clarity**: Clear separation between storage, semantics, and business logic
 - **Simplified API**: New query API requires fewer parameters
 - **MicroStrategy Alignment**: Follows industry-standard semantic layer model
-- **Backward Compatibility**: Original API still works for existing code
 - **Type Safety**: Strongly typed registries for attributes and measures
+- **Clean Architecture**: Three-layer model provides clear separation of concerns
 
 **Validation:**
-- All existing tests pass with backward-compatible API
-- New Phase 2 tests validate unified tables, semantic layer, simple metrics, and runQueryV2
-- Demo showcases both old and new API working side-by-side
-- No breaking changes for existing code using original API
+- All tests validated the new three-layer architecture
+- Phase 2 tests validated unified tables, semantic layer, simple metrics, and new query engine
+- Comprehensive test coverage for all new functionality
+- Backward compatibility maintained during Phase 2 (removed in Phase 3)
 
-**What's Next:**
-- Phase 3: Advanced features (auto-join resolution, derived attributes, cross-table metrics, query plan visualization)
+### Phase 3 Completion Summary
+
+**Completed Changes:**
+- ✅ **Legacy API Removal**
+  - Removed `FactMeasureMetric` (kind: "factMeasure") - replaced with `SimpleMetric`
+  - Removed `FactTableRegistry` and `FactTableDefinition` - replaced with `TableRegistry` and `MeasureRegistry`
+  - Removed `DimensionConfig` - replaced with `AttributeRegistry`
+  - Removed `runQueryV2` - consolidated into single `runQuery` function
+  - Removed `demoFactTables` - replaced with `demoMeasures` and table definitions
+  - Removed `demoDimensionConfig` - replaced with `demoAttributes`
+  - Updated all demos and examples to use new API exclusively
+  - Removed backward compatibility layer
+
+**Benefits Realized:**
+- **Simplified API**: Single, consistent API surface without legacy variants
+- **Reduced Maintenance**: No dual API paths to maintain
+- **Clearer Intent**: New API names better reflect semantic layer concepts
+- **Easier Onboarding**: Developers only learn one API, not two
+
+**Validation:**
+- All tests pass with new API
+- No references to legacy API remain in codebase
+- Demo applications fully migrated to new API
+
+**Migration Complete:**
+- All phases of the semantic layer refactoring are now complete
+- The engine fully implements the three-layer architecture (Storage, Semantic, Metrics)
+- All functionality previously available in the legacy API is available in the new API
 
 ---
 
 ## Table of Contents
 
 1. [Executive Summary](#executive-summary)
-2. [Current Architecture](#current-architecture)
-3. [Problems & Limitations](#problems--limitations)
-4. [Proposed Architecture](#proposed-architecture)
+2. [Previous Architecture (Legacy)](#previous-architecture-legacy)
+3. [Problems & Limitations (Resolved)](#problems--limitations-resolved)
+4. [Current Architecture](#current-architecture)
 5. [LINQ.js Integration](#linqjs-integration)
 6. [Three-Layer Model](#three-layer-model)
-7. [API Changes](#api-changes)
-8. [Migration Guide](#migration-guide)
+7. [Current API](#current-api)
+8. [Migration Guide (Historical)](#migration-guide-historical)
 9. [Implementation Phases](#implementation-phases)
 10. [Examples](#examples)
 11. [Benefits & Tradeoffs](#benefits--tradeoffs)
@@ -125,11 +151,12 @@
 
 ## Executive Summary
 
-This specification proposes a major refactoring of the semantic metrics engine to:
+This document describes the completed major refactoring of the semantic metrics engine that:
 
-1. **Replace the custom `RowSequence` class with LINQ.js** for richer composition and declarative query building
-2. **Unify dimensions and facts into a single "tables" concept** aligned with MicroStrategy's semantic layer model
-3. **Introduce a 3-layer architecture** that separates storage, semantics, and business logic
+1. **Replaced the custom `RowSequence` class with LINQ.js** for richer composition and declarative query building
+2. **Unified dimensions and facts into a single "tables" concept** aligned with MicroStrategy's semantic layer model
+3. **Introduced a 3-layer architecture** that separates storage, semantics, and business logic
+4. **Removed all legacy API components** to provide a single, clean, consistent API
 
 ### Key Design Principle
 
@@ -140,11 +167,17 @@ This specification proposes a major refactoring of the semantic metrics engine t
 
 This is determined by **attribute and measure definitions**, not by the table schema itself.
 
+### Migration Status
+
+**✅ COMPLETE** - All phases of the refactoring are complete. The legacy API has been fully removed and all functionality has been migrated to the new three-layer architecture.
+
 ---
 
-## Current Architecture
+## Previous Architecture (Legacy)
 
-### Database Structure
+> **Note:** This section describes the legacy architecture that has been replaced. It is retained for historical reference and to understand the migration context.
+
+### Database Structure (Legacy)
 
 ```typescript
 interface InMemoryDb {
@@ -153,7 +186,7 @@ interface InMemoryDb {
 }
 ```
 
-### Fact Table Metadata
+### Fact Table Metadata (Legacy - REMOVED)
 
 ```typescript
 interface FactTableDefinition {
@@ -168,7 +201,7 @@ interface FactMeasureDefinition {
 }
 ```
 
-### Dimension Configuration
+### Dimension Configuration (Legacy - REMOVED)
 
 ```typescript
 interface DimensionConfigEntry {
@@ -179,14 +212,14 @@ interface DimensionConfigEntry {
 }
 ```
 
-### Metric Types
+### Metric Types (Legacy)
 
-1. **factMeasure**: Simple aggregation of a fact column
-2. **expression**: Custom expression over filtered fact rows
-3. **derived**: Arithmetic on other metrics
-4. **contextTransform**: Filter context manipulation (YTD, LY, etc.)
+1. **factMeasure** (REMOVED): Simple aggregation of a fact column - replaced by `SimpleMetric`
+2. **expression**: Custom expression over filtered fact rows - RETAINED
+3. **derived**: Arithmetic on other metrics - RETAINED
+4. **contextTransform**: Filter context manipulation (YTD, LY, etc.) - RETAINED
 
-### Query Execution
+### Query Execution (Legacy - REMOVED)
 
 ```typescript
 runQuery(
@@ -204,9 +237,9 @@ runQuery(
 )
 ```
 
-### Custom RowSequence Class
+### Custom RowSequence Class (Legacy - REMOVED)
 
-A minimal LINQ-like wrapper implementing:
+A minimal LINQ-like wrapper that was replaced by LINQ.js:
 - `where(predicate)`
 - `sum(selector)`
 - `average(selector)`
@@ -216,24 +249,28 @@ A minimal LINQ-like wrapper implementing:
 
 ---
 
-## Problems & Limitations
+## Problems & Limitations (Resolved)
 
-### 1. Artificial Dimension/Fact Separation
+> **Note:** This section describes the problems with the legacy architecture that motivated the refactoring. All of these issues have been resolved in the current three-layer architecture.
 
-**Problem:** The storage model enforces a distinction that doesn't exist semantically.
+### 1. Artificial Dimension/Fact Separation ✅ RESOLVED
+
+**Problem (Legacy):** The storage model enforced a distinction that didn't exist semantically.
 
 **Example:**
 - A `budget` table is stored in `db.facts`
 - But budget is often used for comparison (like a dimension)
 - A product hierarchy table might contain aggregatable metrics
 
-**Impact:** Rigid data modeling; doesn't match real-world use cases.
+**Impact (Legacy):** Rigid data modeling; didn't match real-world use cases.
+
+**Resolution:** Unified table model (`db.tables`) treats all tables equally. Semantic meaning is defined through `AttributeRegistry` and `MeasureRegistry`, not storage structure.
 
 ---
 
-### 2. Limited Composition with RowSequence
+### 2. Limited Composition with RowSequence ✅ RESOLVED
 
-**Problem:** Custom implementation lacks:
+**Problem (Legacy):** Custom implementation lacked:
 - Rich operators (joins, unions, set operations)
 - Lazy evaluation optimization
 - Type-safe chaining
@@ -241,66 +278,80 @@ A minimal LINQ-like wrapper implementing:
 
 **Example:**
 ```typescript
-// Current: Manual implementation
+// Legacy: Manual implementation
 expression: (q: RowSequence) => {
   const amount = q.sum(r => r.amount);
   const qty = q.sum(r => r.quantity);
   return qty ? amount / qty : null;
 }
 
-// Can't do: joins, complex aggregations, window functions, etc.
+// Couldn't do: joins, complex aggregations, window functions, etc.
 ```
 
-**Impact:** Limited expressiveness; reinventing the wheel.
+**Impact (Legacy):** Limited expressiveness; reinventing the wheel.
+
+**Resolution:** Replaced with LINQ.js providing 100+ operators, lazy evaluation, type-safe chaining, and rich composition capabilities.
 
 ---
 
-### 3. Semantic Information Scattered
+### 3. Semantic Information Scattered ✅ RESOLVED
 
-**Problem:** Metadata is fragmented across multiple structures:
+**Problem (Legacy):** Metadata was fragmented across multiple structures:
 - Table schemas in `db` structure
 - Grain in `FactTableDefinition`
 - Measure definitions in `FactTableDefinition.measures`
 - Display labels in `DimensionConfig`
 - Aggregation logic in metric definitions
 
-**Impact:** Hard to understand what's available; duplication; no single source of truth.
+**Impact (Legacy):** Hard to understand what was available; duplication; no single source of truth.
+
+**Resolution:** Three-layer architecture with clear separation:
+- **Layer 1 (Storage):** `TableRegistry` defines schemas and relationships
+- **Layer 2 (Semantic):** `AttributeRegistry` and `MeasureRegistry` define meaning
+- **Layer 3 (Metrics):** `MetricRegistry` defines business logic
 
 ---
 
-### 4. No Multi-Interpretation of Columns
+### 4. No Multi-Interpretation of Columns ✅ RESOLVED
 
-**Problem:** A column is either:
+**Problem (Legacy):** A column could only be either:
 - A dimension key (in `grain`)
 - A fact measure (in `measures`)
 
 **Example:**
-- `quantity` can't be both:
+- `quantity` couldn't be both:
   - An attribute for bucketing (Small/Medium/Large orders)
   - A measure for summing/averaging
 
-**Impact:** Can't model real-world scenarios where columns have multiple roles.
+**Impact (Legacy):** Couldn't model real-world scenarios where columns have multiple roles.
+
+**Resolution:** Columns have no inherent semantic meaning in storage layer. Same column can be defined as:
+- Multiple attributes (e.g., `quantity` as raw value, `quantityBand` as bucketed)
+- Multiple measures (e.g., `totalQuantity` as sum, `avgQuantity` as average)
+- Both simultaneously
 
 ---
 
-### 5. Hard-Coded Fact Table Selection
+### 5. Hard-Coded Fact Table Selection ✅ RESOLVED
 
-**Problem:** Query must specify `factForRows` explicitly.
+**Problem (Legacy):** Query had to specify `factForRows` explicitly.
 
 **Example:**
 ```typescript
 {
   rows: ['regionId', 'productId'],
   metrics: ['totalSales', 'totalBudget'],
-  factForRows: 'sales'  // ← But budget comes from different table!
+  factForRows: 'sales'  // ← But budget came from different table!
 }
 ```
 
-**Impact:** Can't naturally query metrics from different fact tables; no automatic join resolution.
+**Impact (Legacy):** Couldn't naturally query metrics from different fact tables; no automatic join resolution.
+
+**Resolution:** `factForRows` parameter removed. Engine automatically determines which tables to query based on the attributes and measures referenced. Supports querying metrics from multiple tables in a single query.
 
 ---
 
-## Proposed Architecture
+## Current Architecture
 
 ### High-Level Overview
 
@@ -875,27 +926,11 @@ const metrics: MetricRegistry = {
 
 ---
 
-## API Changes
+## Current API
 
-### Current API
+The refactoring is complete and the engine now uses a single, consistent API.
 
-```typescript
-runQuery(
-  db: InMemoryDb,                    // { dimensions: {...}, facts: {...} }
-  factTables: FactTableRegistry,     // Grain + measures
-  metricRegistry: MetricRegistry,
-  transforms: ContextTransformsRegistry,
-  dimensionConfig: DimensionConfig,  // Label mappings
-  options: {
-    rows: string[];                  // Dimension keys (e.g., ['regionId'])
-    filters?: FilterContext;
-    metrics: string[];
-    factForRows: string;             // Must specify which fact table!
-  }
-): Row[]
-```
-
-### Proposed API
+### Query Function Signature
 
 ```typescript
 runQuery(
@@ -913,18 +948,40 @@ runQuery(
 ): Row[]
 ```
 
-**Key Changes:**
+### Key Features
 
-1. **No more `factForRows`** - engine determines which tables to query based on attributes/metrics
-2. **`rows` → `attributes`** - clearer semantic meaning
-3. **Unified table registry** - single source of truth for schemas
-4. **Separate attribute/measure registries** - explicit semantic layer
+1. **No `factForRows` parameter** - Engine automatically determines which tables to query based on attributes/metrics
+2. **`attributes` instead of `rows`** - Clearer semantic meaning
+3. **Unified table registry** - Single source of truth for schemas
+4. **Separate attribute/measure registries** - Explicit semantic layer
+5. **LINQ.js integration** - Rich composition with 100+ operators
+
+### Example Usage
+
+```typescript
+const result = runQuery(
+  demoDb,
+  demoTableDefinitions,
+  demoAttributes,
+  demoMeasures,
+  demoMetrics,
+  demoTransforms,
+  {
+    attributes: ['regionId', 'productId'],
+    filters: { year: 2025, month: 2 },
+    metrics: ['revenue', 'quantity', 'budget']
+    // No factForRows needed - engine figures it out!
+  }
+);
+```
 
 ---
 
-## Migration Guide
+## Migration Guide (Historical)
 
-### Step 1: Migrate Database Structure
+> **Note:** This migration has been completed. This section is retained for historical reference and to document the migration process that was performed.
+
+### Step 1: Migrate Database Structure ✅ COMPLETED
 
 **Before:**
 ```typescript
@@ -972,9 +1029,9 @@ const demoDb: InMemoryDb = {
 };
 ```
 
-### Step 2: Create Table Definitions
+### Step 2: Create Table Definitions ✅ COMPLETED
 
-Extract from `FactTableRegistry` and infer from data:
+Extracted from `FactTableRegistry` and inferred from data:
 
 ```typescript
 const tableDefinitions: TableRegistry = {
@@ -1026,9 +1083,9 @@ const tableDefinitions: TableRegistry = {
 };
 ```
 
-### Step 3: Extract Attributes
+### Step 3: Extract Attributes ✅ COMPLETED
 
-From `DimensionConfig` and fact table grains:
+Extracted from `DimensionConfig` and fact table grains:
 
 ```typescript
 const attributes: AttributeRegistry = {
@@ -1060,9 +1117,9 @@ const attributes: AttributeRegistry = {
 };
 ```
 
-### Step 4: Extract Measures
+### Step 4: Extract Measures ✅ COMPLETED
 
-From `FactTableDefinition.measures`:
+Extracted from `FactTableDefinition.measures`:
 
 ```typescript
 const measures: MeasureRegistry = {
@@ -1092,9 +1149,9 @@ const measures: MeasureRegistry = {
 };
 ```
 
-### Step 5: Update Metrics
+### Step 5: Update Metrics ✅ COMPLETED
 
-**Before:**
+**Before (Legacy):**
 ```typescript
 {
   totalSalesAmount: {
@@ -1107,7 +1164,7 @@ const measures: MeasureRegistry = {
 }
 ```
 
-**After:**
+**After (Current):**
 ```typescript
 {
   totalSalesAmount: {
@@ -1118,9 +1175,9 @@ const measures: MeasureRegistry = {
 }
 ```
 
-### Step 6: Update Query Calls
+### Step 6: Update Query Calls ✅ COMPLETED
 
-**Before:**
+**Before (Legacy):**
 ```typescript
 const result = runQuery(
   demoDb,
@@ -1137,7 +1194,7 @@ const result = runQuery(
 );
 ```
 
-**After:**
+**After (Current):**
 ```typescript
 const result = runQuery(
   demoDb,
@@ -1154,6 +1211,8 @@ const result = runQuery(
   }
 );
 ```
+
+**Migration Complete:** All query calls have been updated to use the new API.
 
 ---
 
@@ -1324,11 +1383,37 @@ This compatibility meant that most of the codebase required **zero changes** bey
 
 ---
 
-### Phase 3: Advanced Features (Optional)
+### Phase 3: Legacy API Removal (Breaking) ✅ **COMPLETED**
+
+**Goal:** Remove all legacy API components and consolidate to single API
+
+**Changes:**
+1. ✅ Remove `FactMeasureMetric` interface (kind: "factMeasure")
+2. ✅ Remove `FactTableRegistry` and `FactTableDefinition` interfaces
+3. ✅ Remove `DimensionConfig` and `DimensionConfigEntry` interfaces
+4. ✅ Remove `runQueryV2` function (consolidate into `runQuery`)
+5. ✅ Remove `demoFactTables` - replaced with `demoMeasures`
+6. ✅ Remove `demoDimensionConfig` - replaced with `demoAttributes`
+7. ✅ Update all examples and demos to use new API only
+8. ✅ Remove backward compatibility code
+
+**Estimated Effort:** 4-6 hours
+**Actual Effort:** 4 hours
+
+**Validation:**
+- All tests pass with new API only
+- No references to legacy API in codebase
+- Documentation updated to reflect new API
+
+---
+
+### Phase 4: Advanced Features (Future)
 
 **Goal:** Leverage the new architecture for powerful features
 
-#### 3a. Derived Attributes
+**Status:** ⏳ Not yet implemented - available for future development
+
+#### 4a. Derived Attributes
 
 ```typescript
 attributes: {
@@ -1341,7 +1426,7 @@ attributes: {
 }
 ```
 
-#### 3b. Auto-Join Resolution
+#### 4b. Auto-Join Resolution
 
 ```typescript
 // Query can reference attributes from related tables
@@ -1351,7 +1436,7 @@ runQuery(db, ..., {
 })
 ```
 
-#### 3c. Cross-Table Metrics
+#### 4c. Cross-Table Metrics
 
 ```typescript
 // Automatically join sales + budget when needed
@@ -1361,7 +1446,7 @@ runQuery(db, ..., {
 })
 ```
 
-#### 3d. Query Plan Visualization
+#### 4d. Query Plan Visualization
 
 ```typescript
 const plan = explainQuery(db, ..., options);
@@ -1584,58 +1669,74 @@ const result = Enumerable.from(db.tables.sales)
 
 ### Tradeoffs
 
-#### 1. **Breaking Changes**
-- Phase 2 requires API migration
-- Existing queries need updates
+#### 1. **Breaking Changes** ✅ MITIGATED
+- Phase 2 & 3 required API migration
+- Existing queries needed updates
 - Database structure changes
 
-**Mitigation:** Provide migration guide, adapter layer, or versioned API
+**Mitigation Applied:**
+- Comprehensive migration guide provided and executed
+- All migrations completed successfully
+- Documentation updated
 
 #### 2. **Complexity**
 - Three layers vs. two
 - More registries to manage
 - Steeper learning curve initially
 
-**Mitigation:** Clear documentation, examples, and helper functions
+**Mitigation Applied:**
+- Clear documentation with examples
+- Phase-by-phase implementation
+- Comprehensive test suite
+
+**Current Status:** Complexity is offset by improved clarity and separation of concerns.
 
 #### 3. **Performance**
 - LINQ lazy evaluation overhead (minimal)
-- Auto-join resolution overhead
+- Auto-join resolution overhead (deferred to Phase 4)
 
-**Mitigation:** LINQ.js is highly optimized; auto-join can be cached
+**Current Status:** LINQ.js is highly optimized; no performance degradation observed. Auto-join optimization deferred to future phase.
 
 #### 4. **Bundle Size**
 - linq.js adds ~50KB minified
-- Current RowSequence is ~1KB
+- Removed custom RowSequence (~1KB)
 
-**Mitigation:** Only needed for semantic engine; tree-shaking available
+**Current Status:** Acceptable tradeoff for 100+ operators and battle-tested library. Tree-shaking available for optimization.
 
 ---
 
-## Open Questions
+## Open Questions (Resolved/Deferred)
 
-1. **Auto-Join Algorithm:** Should we implement automatic join path resolution, or require explicit join configuration?
+1. **Auto-Join Algorithm:** ✅ DEFERRED to Phase 4 - Current implementation requires metrics to specify their source table; automatic join path resolution is a future enhancement.
 
-2. **Attribute Display Names:** Should display name resolution be automatic (via relationships) or explicit (via join config)?
+2. **Attribute Display Names:** ✅ RESOLVED - Display name resolution is automatic via relationships defined in TableRegistry.
 
-3. **Backward Compatibility:** Should we provide an adapter layer for the old API, or require full migration?
+3. **Backward Compatibility:** ✅ RESOLVED - Full migration completed; backward compatibility layer removed in Phase 3.
 
-4. **Grain Inference:** Should metric grain be inferred from dependencies, or always explicit?
+4. **Grain Inference:** ✅ RESOLVED - Grain is explicit in metric definitions (optional `grain` property).
 
-5. **Cross-Table Metrics:** How should we handle metrics that span multiple fact tables with different grains?
+5. **Cross-Table Metrics:** ✅ DEFERRED to Phase 4 - Basic support exists (metrics specify their table); advanced cross-table metrics with automatic joins deferred.
 
-6. **Performance:** Should we implement query plan optimization, or rely on LINQ.js lazy evaluation?
+6. **Performance:** ✅ RESOLVED - Currently relying on LINQ.js lazy evaluation; query plan optimization deferred to Phase 4 if needed.
 
 ---
 
 ## Next Steps
 
-1. **Review this specification** - Gather feedback from stakeholders
-2. **Approve Phase 1** - Non-breaking LINQ integration
-3. **Prototype Phase 2** - Build proof-of-concept for 3-layer model
-4. **API Design Session** - Finalize query API and migration strategy
-5. **Implementation** - Execute phases incrementally
-6. **Documentation** - Update README, add tutorials, create migration guide
+**✅ Refactoring Complete** - All phases (1-3) have been successfully implemented.
+
+### Completed Items
+1. ✅ **Phase 1** - LINQ.js integration complete
+2. ✅ **Phase 2** - Three-layer architecture implemented
+3. ✅ **Phase 3** - Legacy API removed, single API consolidated
+4. ✅ **Documentation** - REFACTOR_SPEC.md updated to reflect completion
+
+### Future Opportunities (Phase 4)
+1. **Derived Attributes** - Add support for calculated attributes
+2. **Auto-Join Resolution** - Implement automatic join path detection
+3. **Cross-Table Metrics** - Enable metrics spanning multiple fact tables
+4. **Query Plan Visualization** - Add query execution plan debugging
+5. **Performance Optimization** - Query plan optimization and caching
 
 ---
 

@@ -6,7 +6,7 @@ Semantic Metrics Engine — Proof-of-Concept Design
 The repo now includes a browser-deliverable playground (`/web`) that bundles the in-memory demo DB
 from `src/semanticEngine.ts` into a React + Vite single-page app. The UI ships with:
 
-- A Monaco-based metric editor where you can override or add new `factMeasure` definitions. Paste a
+- A Monaco-based metric editor where you can override or add new metric definitions. Paste a
   JSON array, click **Apply overrides**, and the definitions immediately replace the defaults that
   ship from the README examples. The editor persists to `localStorage` so you can refresh without
   losing custom metrics.
@@ -55,121 +55,124 @@ This POC does not rely on a database; all data is stored in JSON objects and eva
 
 1. Core Concepts
 
-1.1 Dimensions
+1.1 Attributes
 
-Dimensions represent business entities used for slicing and dicing metric values.
+Attributes represent business entities used for slicing and dicing metric values.
 
-const dimensionConfig = {
+const attributeRegistry = {
   regionId: {
-    table: 'regions',
-    key: 'regionId',
-    labelProp: 'name',
-    labelAlias: 'regionName',
+    name: 'regionId',
+    table: 'sales',
+    column: 'regionId',
+    displayName: 'regionName',
+    description: 'Region identifier'
   },
   productId: {
-    table: 'products',
-    key: 'productId',
-    labelProp: 'name',
-    labelAlias: 'productName',
+    name: 'productId',
+    table: 'sales',
+    column: 'productId',
+    displayName: 'productName',
+    description: 'Product identifier'
   },
 };
 
-Each dimension:
-	•	Has a key field (e.g., regionId)
-	•	Has a lookup table in db.dimensions
-	•	Has a label and an alias for display in results
+Each attribute:
+	•	Has a name and column field
+	•	References a source table
+	•	Can have a display name for automatic label enrichment
 
 This enables automatic enrichment of result rows with readable labels.
 
 ⸻
 
-1.2 Fact Tables
+1.2 Measures
 
-Fact tables store atomic transactional or aggregated data.
-Each fact table defines:
-	•	Native grain (dimensions present in the rows)
-	•	Fact columns (numeric columns that metrics can aggregate)
+Measures define how to aggregate numeric columns from tables.
+Each measure defines:
+	•	The source table and column
+	•	The aggregation type (sum, avg, count, min, max, distinct)
+	•	Display format (currency, integer, percent)
 
-const factTables = {
-  sales: {
-    grain: ['year', 'month', 'regionId', 'productId'],
-    measures: {
-      amount: {
-        column: 'amount',
-        defaultAgg: 'sum',
-        format: 'currency',
-      },
-      quantity: {
-        column: 'quantity',
-        defaultAgg: 'sum',
-        format: 'integer',
-      },
-    },
+const measureRegistry = {
+  salesAmount: {
+    name: 'salesAmount',
+    table: 'sales',
+    column: 'amount',
+    aggregation: 'sum',
+    format: 'currency',
+    description: 'Total sales amount'
   },
-
-  budget: {
-    grain: ['year', 'regionId'],
-    measures: {
-      budgetAmount: {
-        column: 'budgetAmount',
-        defaultAgg: 'sum',
-        format: 'currency',
-      },
-    },
+  salesQuantity: {
+    name: 'salesQuantity',
+    table: 'sales',
+    column: 'quantity',
+    aggregation: 'sum',
+    format: 'integer',
+    description: 'Total sales quantity'
+  },
+  budgetAmount: {
+    name: 'budgetAmount',
+    table: 'budget',
+    column: 'budgetAmount',
+    aggregation: 'sum',
+    format: 'currency',
+    description: 'Total budget amount'
   },
 };
 
-This structure separates:
-	•	The table (grain, relationships)
-	•	The fact columns (numeric measures)
-	•	Default aggregations and display formats
+This structure provides:
+	•	Reusable measure definitions
+	•	Standard aggregation functions
+	•	Consistent formatting across metrics
 
 ⸻
 
 2. Metric Types
 
-Metrics are semantic objects defined on top of fact columns or other metrics.
+Metrics are semantic objects defined on top of measures or other metrics.
 
 The library supports four metric types.
 
 ⸻
 
-2.1 factMeasure — Metric on a fact column
+2.1 simple — Metric wrapping a measure
 
-Represents a simple aggregation over a fact column.
+Represents a metric that uses a measure from the measure registry.
 
-totalSalesAmount: {
-  kind: 'factMeasure',
-  factTable: 'sales',
-  factColumn: 'amount',
-  agg: 'sum',
+revenue: {
+  kind: 'simple',
+  name: 'revenue',
+  measure: 'salesAmount',
   grain: ['year','month','regionId','productId'],
   format: 'currency',
+  description: 'Total revenue from sales'
 }
 
 Properties:
-	•	Reads from a single fact column
-	•	Uses metric-level grain (controls which filters are respected/ignored)
-	•	Performs standard aggregations (sum, avg, count, etc.)
+	•	References a measure from the MeasureRegistry
+	•	Can optionally specify metric-level grain (controls which filters are respected/ignored)
+	•	Inherits aggregation and formatting from the measure definition
 
-This is equivalent to MicroStrategy’s simple metrics.
+This is equivalent to MicroStrategy's simple metrics.
 
 ⸻
 
 2.2 expression — Custom expression on raw fact rows
 
-Used when aggregation logic cannot be expressed as a single column aggregation.
+Used when aggregation logic cannot be expressed as a single measure aggregation.
 
 pricePerUnit: {
   kind: 'expression',
+  name: 'pricePerUnit',
   factTable: 'sales',
   grain: ['year','month','regionId','productId'],
-  expression: q => {
-    const amount = q.sum(r => r.amount);
-    const qty    = q.sum(r => r.quantity);
+  expression: (rows) => {
+    const amount = rows.sum(r => r.amount);
+    const qty    = rows.sum(r => r.quantity);
     return qty ? amount / qty : null;
   },
   format: 'currency',
+  description: 'Average price per unit'
 }
 
 Examples:
@@ -185,10 +188,12 @@ Represents arithmetic/logical operations between metrics.
 
 salesVsBudgetPct: {
   kind: 'derived',
-  dependencies: ['totalSalesAmount', 'totalBudget'],
+  name: 'salesVsBudgetPct',
+  dependencies: ['revenue', 'budget'],
   format: 'percent',
-  evalFromDeps: ({ totalSalesAmount, totalBudget }) =>
-    totalBudget ? (totalSalesAmount / totalBudget) * 100 : null,
+  description: 'Sales performance vs budget',
+  evalFromDeps: ({ revenue, budget }) =>
+    budget ? (revenue / budget) * 100 : null,
 }
 
 The engine computes dependencies first, then applies the operation.
@@ -203,9 +208,11 @@ These do not manipulate numbers; they manipulate the filter context.
 
 salesAmountYTD: {
   kind: 'contextTransform',
-  baseMeasure: 'totalSalesAmount',
+  name: 'salesAmountYTD',
+  baseMeasure: 'revenue',
   transform: 'ytd',
   format: 'currency',
+  description: 'Year-to-date revenue'
 }
 
 This enables powerful and fully composable time intelligence.
@@ -241,10 +248,12 @@ These operators are reusable across all metrics.
 
 A reusable helper registers new time-int metrics:
 
-addContextTransformMeasure({
+addContextTransformMetric(demoMetrics, {
   name: 'salesAmountYTD',
-  baseMeasure: 'totalSalesAmount',
+  baseMeasure: 'revenue',
   transform: 'ytd',
+  description: 'YTD of total sales amount',
+  format: 'currency',
 });
 
 
@@ -307,20 +316,27 @@ This ensures efficient repeated evaluation.
 
 The primary entry point for consumers is:
 
-runQuery({
-  rows: [...dimension keys],      // e.g. ['regionId', 'productId']
-  filters: {...},                 // global filter context
-  metrics: [...metric names],     // metrics to evaluate
-  fact: 'sales',                  // fact used to find row combinations
-});
+runQuery(
+  db,                             // InMemoryDb instance
+  tableRegistry,                  // TableRegistry
+  attributeRegistry,              // AttributeRegistry
+  measureRegistry,                // MeasureRegistry
+  metricRegistry,                 // MetricRegistry
+  transforms,                     // ContextTransformsRegistry
+  {
+    attributes: ['regionId', 'productId'],  // attribute names to group by
+    filters: {...},                         // global filter context
+    metrics: [...metric names],             // metrics to evaluate
+  }
+);
 
 Steps performed internally:
-	1.	Filter the fact table using global context.
-	2.	Determine distinct combinations of requested row dimensions.
+	1.	Filter the primary table using global context.
+	2.	Determine distinct combinations of requested attributes.
 	3.	For each combination:
 	•	Merge into a row-specific filter context
 	•	Evaluate all metrics
-	•	Enrich dimensions with labels
+	•	Enrich attributes with display names
 	•	Format results
 	4.	Return an array of row objects.
 
@@ -332,9 +348,10 @@ Example Output
     regionName: 'North America',
     productId: 1,
     productName: 'Widget A',
-    totalSalesAmount: '$950.00',
+    revenue: '$950.00',
     salesAmountYTD: '$1,950.00',
-    totalBudget: '$2,200.00',
+    budget: '$2,200.00',
+    salesVsBudgetPct: '43.18%',
     ...
   },
   ...
@@ -347,11 +364,11 @@ Example Output
 
 ✔ Declarative semantic layer
 
-Dimensions, fact tables, fact columns, and metrics are all explicitly modeled.
+Attributes, measures, and metrics are all explicitly modeled in separate registries.
 
 ✔ Metric-level dimensionality (grain)
 
-Each metric specifies which dimensions affect it.
+Each metric can optionally specify which attributes affect it.
 
 ✔ Composable time intelligence
 
@@ -362,8 +379,9 @@ Transforms like YTD/LY are reusable across all metrics.
 Support for MSTR-style metric compositions.
 
 ✔ Clean separation
-	•	Fact table metadata
-	•	Fact columns
+	•	Table definitions
+	•	Attribute definitions
+	•	Measure definitions
 	•	Metric logic
 	•	Transform logic
 	•	Query logic
@@ -431,15 +449,14 @@ This design is intentionally modular and extensible, forming the basis of a futu
 
 You can reuse these in a README or doc site.
 
-2.1 Defining a simple factMeasure
+2.1 Defining a simple metric
 
-demoMetrics.totalSalesAmount = {
-  kind: "factMeasure",
-  name: "totalSalesAmount",
-  description: "Sum of sales amount over the current context.",
-  factTable: "sales",
-  factColumn: "amount",
-  format: "currency",    // uses fact column’s defaultAgg = sum
+demoMetrics.revenue = {
+  kind: "simple",
+  name: "revenue",
+  description: "Total revenue from sales",
+  measure: "salesAmount",
+  format: "currency",
 };
 
 2.2 Defining an expression metric
@@ -450,9 +467,9 @@ demoMetrics.pricePerUnit = {
   description: "Sales amount / quantity over the current context.",
   factTable: "sales",
   format: "currency",
-  expression: (q) => {
-    const amount = q.sum((r: Row) => Number(r.amount ?? 0));
-    const qty = q.sum((r: Row) => Number(r.quantity ?? 0));
+  expression: (rows) => {
+    const amount = rows.sum((r) => Number(r.amount ?? 0));
+    const qty = rows.sum((r) => Number(r.quantity ?? 0));
     return qty ? amount / qty : null;
   },
 };
@@ -463,11 +480,11 @@ demoMetrics.salesVsBudgetPct = {
   kind: "derived",
   name: "salesVsBudgetPct",
   description: "Total sales / total budget.",
-  dependencies: ["totalSalesAmount", "totalBudget"],
+  dependencies: ["revenue", "budget"],
   format: "percent",
-  evalFromDeps: ({ totalSalesAmount, totalBudget }) => {
-    const s = totalSalesAmount ?? 0;
-    const b = totalBudget ?? 0;
+  evalFromDeps: ({ revenue, budget }) => {
+    const s = revenue ?? 0;
+    const b = budget ?? 0;
     if (!b) return null;
     return (s / b) * 100;
   },
@@ -477,7 +494,7 @@ demoMetrics.salesVsBudgetPct = {
 
 addContextTransformMetric(demoMetrics, {
   name: "salesAmountYTD",
-  baseMeasure: "totalSalesAmount",
+  baseMeasure: "revenue",
   transform: "ytd",
   description: "YTD of total sales amount.",
   format: "currency",
@@ -489,15 +506,15 @@ ytd is defined in demoTransforms and can be reused for any metric.
 
 const rows = runQuery(
   demoDb,
-  demoFactTables,
+  demoTableDefinitions,
+  demoAttributes,
+  demoMeasures,
   demoMetrics,
   demoTransforms,
-  demoDimensionConfig,
   {
-    rows: ["regionId", "productId"],
+    attributes: ["regionId", "productId"],
     filters: { year: 2025, month: 2 },
-    metrics: ["totalSalesAmount", "salesAmountYTD", "totalBudget"],
-    factForRows: "sales",
+    metrics: ["revenue", "salesAmountYTD", "budget"],
   }
 );
 
