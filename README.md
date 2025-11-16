@@ -1,222 +1,372 @@
-# miniature-fiesta
-Semantic Metrics Engine — Proof-of-Concept Design
+# Semantic Metrics Engine
 
-## Interactive playground
+A modern, TypeScript-based semantic layer for defining and evaluating business metrics with composable time intelligence, multi-grain support, and declarative metric definitions.
 
-The repo now includes a browser-deliverable playground (`/web`) that bundles the in-memory demo DB
-from `src/semanticEngine.ts` into a React + Vite single-page app. The UI ships with:
+## Overview
 
-- A Monaco-based metric editor where you can override or add new `factMeasure` definitions. Paste a
-  JSON array, click **Apply overrides**, and the definitions immediately replace the defaults that
-  ship from the README examples. The editor persists to `localStorage` so you can refresh without
-  losing custom metrics.
-- A visual runner that wraps the existing `runQuery` helper. Pick row dimensions (respecting the
-  grain of your fact table), metrics, filters, and run the query against the in-memory dataset.
-- A result panel with an interactive table, a selectable bar/line chart fed by the same dataset, and
-  expandable blocks that show the request payload plus the raw response rows. This makes it easy to
-  reason about how metric grain, filters, and formatting behave.
+This project implements a **three-layer semantic model** inspired by enterprise BI platforms (MicroStrategy, LookML, MetricFlow) with a focus on:
 
-### Running locally
+- **Declarative metric definitions** — Define metrics once, reuse everywhere
+- **Composable time intelligence** — YTD, LastYear, and custom transforms
+- **Multi-grain evaluation** — Metrics can aggregate at different dimensional levels
+- **Type-safe operations** — Full TypeScript support with LINQ.js query engine
+- **In-memory proof-of-concept** — No database required, perfect for prototyping
+
+## Architecture
+
+### Three-Layer Semantic Model
 
 ```
-npm install --prefix web
-npm run dev --prefix web
+┌─────────────────────────────────────────────────┐
+│  Business Logic Layer (Metrics)                 │
+│  - Simple Metrics (wrap measures)               │
+│  - Fact Measures (direct aggregations)          │
+│  - Expression Metrics (custom logic)            │
+│  - Derived Metrics (metric compositions)        │
+│  - Context Transforms (time intelligence)       │
+└─────────────────────────────────────────────────┘
+                      ↓
+┌─────────────────────────────────────────────────┐
+│  Semantic Layer (Attributes & Measures)         │
+│  - Attributes (dimensions for slicing)          │
+│  - Measures (aggregatable columns)              │
+│  - Relationships (table joins)                  │
+└─────────────────────────────────────────────────┘
+                      ↓
+┌─────────────────────────────────────────────────┐
+│  Storage Layer (Tables)                         │
+│  - Unified table storage                        │
+│  - Schema definitions                           │
+│  - In-memory data (POC)                         │
+└─────────────────────────────────────────────────┘
 ```
 
-The site lives at http://localhost:5173/shiny-octo-robot/ when served through Vite. For a production
-build run `npm run build` (or `npm run build --prefix web`) and open the contents of `web/dist/`.
+### Key Features
 
-### Deploying to GitHub Pages
+✅ **Five metric types** supporting all common patterns:
+- `simple` — Wraps a measure from the semantic layer
+- `factMeasure` — Direct aggregation on a fact column
+- `expression` — Custom aggregation logic using LINQ.js
+- `derived` — Computed from other metrics
+- `contextTransform` — Time intelligence and filter manipulation
 
-- `npm run deploy:docs` builds the SPA and copies the static assets into `docs/` for manual GitHub
-  Pages hosting if desired.
-- `.github/workflows/pages.yml` installs dependencies, runs lint/build tasks, and publishes the `web`
-  build to the repository’s GitHub Pages environment on every push to `main`.
+✅ **Metric-level grain** (like MicroStrategy level metrics):
+- Each metric specifies which dimensions affect it
+- Filters outside the grain are automatically ignored
+- Enables metrics at different aggregation levels in the same query
 
-Overview
+✅ **Composable context transforms**:
+- Reusable transformations: `ytd`, `lastYear`, `ytdLastYear`
+- Apply to any metric via `contextTransform` type
+- Easy to extend with custom transforms
 
-This document describes the design and implementation of a semantic metrics engine — a lightweight library inspired by:
-	•	MicroStrategy’s semantic layer (facts, metrics, dimensionality, transformations)
-	•	LookML/MetricFlow’s modern metric modeling
-	•	Composable operators (YTD, LY, etc.)
-	•	Power BI’s dynamic filter-context evaluation
+✅ **Powered by LINQ.js**:
+- 100+ operators for data manipulation
+- Lazy evaluation for performance
+- Type-safe transformations
+- Supports complex queries: joins, grouping, set operations
 
-The goal is to provide a flexible, in-memory engine that models:
-	•	Reusable dimensions
-	•	Configurable fact tables and fact columns
-	•	Semantically defined metrics (base, derived, and expression-based)
-	•	Reusable, composable time-intelligence transformations
-	•	Dynamic level-aware evaluation (metric-level grain)
-	•	A simple query API to return dimensioned result sets
+## Quick Start
 
-This POC does not rely on a database; all data is stored in JSON objects and evaluated via JavaScript and the linq library.
+### Installation
 
-⸻
+```bash
+# Clone the repository
+git clone https://github.com/jnyinglis/miniature-fiesta.git
+cd miniature-fiesta
 
-1. Core Concepts
+# Install dependencies (if using a package manager)
+npm install
+```
 
-1.1 Dimensions
+### Running the Demo
 
-Dimensions represent business entities used for slicing and dicing metric values.
+The main engine is in `src/semanticEngine.ts` and includes a runnable demo:
 
-const dimensionConfig = {
-  regionId: {
-    table: 'regions',
-    key: 'regionId',
-    labelProp: 'name',
-    labelAlias: 'regionName',
-  },
-  productId: {
-    table: 'products',
-    key: 'productId',
-    labelProp: 'name',
-    labelAlias: 'productName',
-  },
+```bash
+# Run the demo queries
+node src/semanticEngine.ts
+```
+
+This will execute sample queries showing:
+- Multi-dimensional slicing (Region × Product)
+- Time intelligence (YTD, LastYear comparisons)
+- Derived metrics (Sales vs Budget %)
+- Different grain levels
+
+### Running Tests
+
+Comprehensive test suite with 50+ test cases:
+
+```bash
+# Run all tests
+node src/semanticEngine.test.js
+```
+
+Tests cover:
+- LINQ.js integration
+- Filter matching and context application
+- All metric types (factMeasure, expression, derived, contextTransform)
+- Query execution
+- Edge cases and error handling
+
+## Usage Examples
+
+### Defining Metrics
+
+```typescript
+import { MetricRegistry, addContextTransformMetric } from './semanticEngine.ts';
+
+const metrics: MetricRegistry = {};
+
+// Simple metric wrapping a measure
+metrics.revenue = {
+  kind: "simple",
+  name: "revenue",
+  measure: "salesAmount",  // References MeasureRegistry
+  format: "currency"
 };
 
-Each dimension:
-	•	Has a key field (e.g., regionId)
-	•	Has a lookup table in db.dimensions
-	•	Has a label and an alias for display in results
-
-This enables automatic enrichment of result rows with readable labels.
-
-⸻
-
-1.2 Fact Tables
-
-Fact tables store atomic transactional or aggregated data.
-Each fact table defines:
-	•	Native grain (dimensions present in the rows)
-	•	Fact columns (numeric columns that metrics can aggregate)
-
-const factTables = {
-  sales: {
-    grain: ['year', 'month', 'regionId', 'productId'],
-    measures: {
-      amount: {
-        column: 'amount',
-        defaultAgg: 'sum',
-        format: 'currency',
-      },
-      quantity: {
-        column: 'quantity',
-        defaultAgg: 'sum',
-        format: 'integer',
-      },
-    },
-  },
-
-  budget: {
-    grain: ['year', 'regionId'],
-    measures: {
-      budgetAmount: {
-        column: 'budgetAmount',
-        defaultAgg: 'sum',
-        format: 'currency',
-      },
-    },
-  },
+// Fact measure with direct aggregation
+metrics.totalSales = {
+  kind: "factMeasure",
+  name: "totalSales",
+  factTable: "sales",
+  factColumn: "amount",
+  format: "currency"
+  // grain defaults to fact table's grain
 };
 
-This structure separates:
-	•	The table (grain, relationships)
-	•	The fact columns (numeric measures)
-	•	Default aggregations and display formats
-
-⸻
-
-2. Metric Types
-
-Metrics are semantic objects defined on top of fact columns or other metrics.
-
-The library supports four metric types.
-
-⸻
-
-2.1 factMeasure — Metric on a fact column
-
-Represents a simple aggregation over a fact column.
-
-totalSalesAmount: {
-  kind: 'factMeasure',
-  factTable: 'sales',
-  factColumn: 'amount',
-  agg: 'sum',
-  grain: ['year','month','regionId','productId'],
-  format: 'currency',
-}
-
-Properties:
-	•	Reads from a single fact column
-	•	Uses metric-level grain (controls which filters are respected/ignored)
-	•	Performs standard aggregations (sum, avg, count, etc.)
-
-This is equivalent to MicroStrategy’s simple metrics.
-
-⸻
-
-2.2 expression — Custom expression on raw fact rows
-
-Used when aggregation logic cannot be expressed as a single column aggregation.
-
-pricePerUnit: {
-  kind: 'expression',
-  factTable: 'sales',
-  grain: ['year','month','regionId','productId'],
-  expression: q => {
-    const amount = q.sum(r => r.amount);
-    const qty    = q.sum(r => r.quantity);
+// Expression metric with custom logic
+metrics.pricePerUnit = {
+  kind: "expression",
+  name: "pricePerUnit",
+  factTable: "sales",
+  format: "currency",
+  expression: (rows) => {
+    const amount = rows.sum(r => r.amount);
+    const qty = rows.sum(r => r.quantity);
     return qty ? amount / qty : null;
+  }
+};
+
+// Derived metric from other metrics
+metrics.salesVsBudget = {
+  kind: "derived",
+  name: "salesVsBudget",
+  dependencies: ["totalSales", "totalBudget"],
+  format: "percent",
+  evalFromDeps: ({ totalSales, totalBudget }) => {
+    return totalBudget ? (totalSales / totalBudget) * 100 : null;
+  }
+};
+
+// Time intelligence via context transform
+addContextTransformMetric(metrics, {
+  name: "salesYTD",
+  baseMeasure: "totalSales",
+  transform: "ytd",  // References ContextTransformsRegistry
+  format: "currency"
+});
+```
+
+### Querying Data
+
+```typescript
+import { runQuery, demoDb, demoFactTables, demoMetrics, demoTransforms, demoDimensionConfig, demoMeasures } from './semanticEngine.ts';
+
+// Query: 2025 February sales by Region and Product
+const results = runQuery(
+  demoDb,
+  demoFactTables,
+  demoMetrics,
+  demoTransforms,
+  demoDimensionConfig,
+  {
+    rows: ["regionId", "productId"],  // Dimensions for slicing
+    filters: { year: 2025, month: 2 },  // Global filters
+    metrics: ["totalSales", "salesYTD", "salesVsBudget"],  // Metrics to evaluate
+    factForRows: "sales"  // Fact table to determine row combinations
   },
-  format: 'currency',
-}
+  demoMeasures
+);
 
-Examples:
-	•	Ratios
-	•	Conditional metrics
-	•	Multi-column computations
+console.table(results);
+// Output:
+// ┌─────────┬──────────────┬───────────┬──────────────┬─────────────┬──────────────┬─────────────────┐
+// │ (index) │ regionId     │ regionName│ productId    │ productName │ totalSales   │ salesYTD        │
+// ├─────────┼──────────────┼───────────┼──────────────┼─────────────┼──────────────┼─────────────────┤
+// │    0    │ 'NA'         │ 'North...'│      1       │ 'Widget A'  │ '$950.00'    │ '$1,950.00'     │
+// │    1    │ 'EU'         │ 'Europe'  │      2       │ 'Widget B'  │ '$450.00'    │ '$450.00'       │
+// └─────────┴──────────────┴───────────┴──────────────┴─────────────┴──────────────┴─────────────────┘
+```
 
-⸻
+### Using the New Semantic Layer API (Phase 2)
 
-2.3 derived — Metric composed from other metrics
+```typescript
+import { runQueryV2, demoDb, demoTableDefinitions, demoAttributes, demoMeasures, demoMetrics, demoTransforms } from './semanticEngine.ts';
 
-Represents arithmetic/logical operations between metrics.
+// Simpler API using attributes from the semantic layer
+const results = runQueryV2(
+  demoDb,
+  demoTableDefinitions,
+  demoAttributes,
+  demoMeasures,
+  demoMetrics,
+  demoTransforms,
+  {
+    attributes: ['regionId', 'productId'],  // Semantic attributes
+    filters: { year: 2025, month: 2 },
+    metrics: ['revenue', 'quantity', 'budget']  // Simple metrics
+  }
+);
 
-salesVsBudgetPct: {
-  kind: 'derived',
-  dependencies: ['totalSalesAmount', 'totalBudget'],
-  format: 'percent',
-  evalFromDeps: ({ totalSalesAmount, totalBudget }) =>
-    totalBudget ? (totalSalesAmount / totalBudget) * 100 : null,
-}
+console.table(results);
+```
 
-The engine computes dependencies first, then applies the operation.
+## Project Structure
 
-Equivalent to MicroStrategy compound metrics.
+```
+miniature-fiesta/
+├── src/
+│   ├── semanticEngine.ts       # Main engine implementation
+│   ├── semanticEngine.test.js  # Comprehensive test suite
+│   ├── linq.js                 # LINQ.js library (query engine)
+│   ├── linq.d.ts               # TypeScript definitions for LINQ.js
+│   └── operators.md            # LINQ.js operator reference
+├── REFACTOR_SPEC.md            # Refactoring history and architecture
+├── TEST_PLAN.md                # Detailed test documentation
+├── .gitignore                  # Git ignore rules
+└── README.md                   # This file
+```
 
-⸻
+## Refactoring History
 
-2.4 contextTransform — Time-int or other context-level operators
+This codebase has undergone two major refactoring phases:
 
-These do not manipulate numbers; they manipulate the filter context.
+### ✅ Phase 1: LINQ.js Integration (Completed 2025-11-16)
 
-salesAmountYTD: {
-  kind: 'contextTransform',
-  baseMeasure: 'totalSalesAmount',
-  transform: 'ytd',
-  format: 'currency',
-}
+**Goal:** Replace custom `RowSequence` class with industry-standard LINQ.js library
 
-This enables powerful and fully composable time intelligence.
+**Changes:**
+- Removed 73 lines of custom query code
+- Integrated LINQ.js (100+ operators)
+- Updated all metric evaluation to use LINQ.js enumerables
+- Added comprehensive test suite (50+ test cases)
 
-⸻
+**Benefits:**
+- Access to powerful query operators (joins, set operations, advanced sorting)
+- Lazy evaluation for better performance
+- Battle-tested library (no custom maintenance burden)
+- Type-safe transformations
 
-3. Context Transforms (Time Intelligence)
+### ✅ Phase 2: Three-Layer Semantic Model (Completed 2025-11-16)
 
-A context transform takes a filter context and returns a modified context.
+**Goal:** Implement enterprise-grade semantic layer architecture
 
-const contextTransforms = {
+**Changes:**
+
+**2a. Storage Layer (Unified Tables)**
+- Merged separate dimension/fact storage into unified `db.tables`
+- Added table schema definitions with relationships
+- Created `TableRegistry` for metadata
+
+**2b. Semantic Layer (Attributes & Measures)**
+- Created `AttributeDefinition` for dimensional slicing
+- Created `MeasureDefinition` for aggregatable columns
+- Added display name resolution via relationships
+- Implemented demo registries for attributes and measures
+
+**2c. Metric Layer Updates**
+- Added `SimpleMetric` type for wrapping measures
+- Updated evaluation engine to support measure registry
+- Created demo simple metrics (revenue, quantity, budget)
+- Maintained backward compatibility with existing metric types
+
+**2d. Query Engine Refactor**
+- Implemented `runQueryV2` with simplified API
+- Automatic table determination based on attributes
+- No more `factForRows` parameter required
+- Enhanced relationship traversal for display names
+
+**Benefits:**
+- **Flexibility**: Same column can be attribute, measure, or both
+- **Clarity**: Clear separation of concerns (storage → semantics → business logic)
+- **Simplified API**: Fewer parameters, more intuitive
+- **Industry Alignment**: Follows MicroStrategy/LookML patterns
+- **Backward Compatibility**: Original API still works
+
+## Core Concepts
+
+### 1. Tables (Storage Layer)
+
+Tables store raw data with defined schemas and relationships:
+
+```typescript
+const tableDefinitions: TableRegistry = {
+  sales: {
+    name: 'sales',
+    columns: {
+      year: { dataType: 'number' },
+      month: { dataType: 'number' },
+      regionId: { dataType: 'string' },
+      productId: { dataType: 'number' },
+      amount: { dataType: 'number' },
+      quantity: { dataType: 'number' }
+    },
+    relationships: [
+      {
+        to: 'regions',
+        from: ['regionId'],
+        toColumns: ['regionId'],
+        type: '1:M'
+      }
+    ]
+  }
+};
+```
+
+### 2. Attributes & Measures (Semantic Layer)
+
+**Attributes** define how to slice and group data:
+
+```typescript
+const attributes: AttributeRegistry = {
+  regionId: {
+    name: 'regionId',
+    table: 'sales',
+    column: 'regionId',
+    displayName: 'regionName',  // Auto-joins to regions.name
+    description: 'Region identifier'
+  }
+};
+```
+
+**Measures** define aggregatable columns:
+
+```typescript
+const measures: MeasureRegistry = {
+  salesAmount: {
+    name: 'salesAmount',
+    table: 'sales',
+    column: 'amount',
+    aggregation: 'sum',
+    format: 'currency',
+    description: 'Total sales amount'
+  }
+};
+```
+
+### 3. Metrics (Business Logic Layer)
+
+Metrics define business calculations that can reference attributes, measures, and other metrics. See "Defining Metrics" above for examples.
+
+### 4. Context Transforms (Time Intelligence)
+
+Transforms manipulate the filter context before evaluation:
+
+```typescript
+const transforms: ContextTransformsRegistry = {
   ytd(ctx) {
     if (ctx.year == null || ctx.month == null) return ctx;
     return { ...ctx, month: { lte: ctx.month } };
@@ -225,283 +375,132 @@ const contextTransforms = {
   lastYear(ctx) {
     if (ctx.year == null) return ctx;
     return { ...ctx, year: ctx.year - 1 };
-  },
-
-  ytdLastYear(ctx) {
-    if (ctx.year == null || ctx.month == null) return ctx;
-    return {
-      ...ctx,
-      year: ctx.year - 1,
-      month: { lte: ctx.month },
-    };
-  },
+  }
 };
+```
 
-These operators are reusable across all metrics.
+Apply to any metric:
 
-A reusable helper registers new time-int metrics:
-
-addContextTransformMeasure({
-  name: 'salesAmountYTD',
-  baseMeasure: 'totalSalesAmount',
-  transform: 'ytd',
+```typescript
+addContextTransformMetric(metrics, {
+  name: "salesYTD",
+  baseMeasure: "totalSales",
+  transform: "ytd"
 });
+```
 
+### 5. Metric-Level Grain
 
-⸻
+Each metric can specify its dimensional grain, controlling which filters affect it:
 
-4. Metric-Level Dimensionality (Grain)
-
-A metric defines the set of dimensions in the context that it cares about.
-
-grain: ['year', 'regionId']
-
-During evaluation, filters not included in the metric grain are ignored.
-
-Example:
-	•	Metric grain = ['year','regionId']
-	•	Filter context = { year:2025, regionId:'NA', productId:1 }
-
-productId filter is ignored.
-
-This models MicroStrategy level metrics:
-	•	“At a higher level”
-	•	“Ignore certain dimensions”
-	•	“Force certain dimensions”
-
-⸻
-
-5. Filter Context Evaluation
-
-The filter context is applied to fact rows by checking each filter only against dimensions in the metric’s grain.
-
-applyContextToFact(rows, context, grain)
-
-Supports:
-	•	Equality ({ regionId:'NA' })
-	•	Range ({ month: { from:1, to:3 } })
-	•	Comparison ({ month: { lte: 6 } })
-
-The library relies on the linq package to filter rows efficiently.
-
-⸻
-
-6. Metric Evaluation Engine
-
-A DAG evaluation engine handles:
-	•	Dependency resolution
-	•	Context transforms
-	•	Fact-measure evaluation
-	•	Derived metrics
-	•	Caching results per (metric, context)
-
-Metric values are memoized using:
-
-cacheKey = metricName + JSON.stringify(context)
-
-This ensures efficient repeated evaluation.
-
-⸻
-
-7. Query API
-
-The primary entry point for consumers is:
-
-runQuery({
-  rows: [...dimension keys],      // e.g. ['regionId', 'productId']
-  filters: {...},                 // global filter context
-  metrics: [...metric names],     // metrics to evaluate
-  fact: 'sales',                  // fact used to find row combinations
-});
-
-Steps performed internally:
-	1.	Filter the fact table using global context.
-	2.	Determine distinct combinations of requested row dimensions.
-	3.	For each combination:
-	•	Merge into a row-specific filter context
-	•	Evaluate all metrics
-	•	Enrich dimensions with labels
-	•	Format results
-	4.	Return an array of row objects.
-
-Example Output
-
-[
-  {
-    regionId: 'NA',
-    regionName: 'North America',
-    productId: 1,
-    productName: 'Widget A',
-    totalSalesAmount: '$950.00',
-    salesAmountYTD: '$1,950.00',
-    totalBudget: '$2,200.00',
-    ...
-  },
-  ...
-]
-
-
-⸻
-
-8. Key Architectural Strengths
-
-✔ Declarative semantic layer
-
-Dimensions, fact tables, fact columns, and metrics are all explicitly modeled.
-
-✔ Metric-level dimensionality (grain)
-
-Each metric specifies which dimensions affect it.
-
-✔ Composable time intelligence
-
-Transforms like YTD/LY are reusable across all metrics.
-
-✔ Derived and expression metrics
-
-Support for MSTR-style metric compositions.
-
-✔ Clean separation
-	•	Fact table metadata
-	•	Fact columns
-	•	Metric logic
-	•	Transform logic
-	•	Query logic
-
-✔ Works entirely in-memory
-
-Perfect for POCs or small embedded semantic engines.
-
-⸻
-
-9. Possible Extensions
-
-This foundation enables:
-
-A. Hierarchies
-	•	Year → Quarter → Month → Day
-	•	Region → Country → City
-
-B. Column Axis (Pivot Grids)
-
-Return results in MicroStrategy-style grid format:
-	•	Rows × Columns × Metrics
-
-C. Calculation Templates
-
-Reusable metric types:
-	•	Percent of total
-	•	Moving average (7-day, 30-day)
-	•	Rank (dense, ordinal)
-	•	Running totals
-
-D. Multiple Fact Table Joining
-
-Fact stitching / conformed dimensions.
-
-E. SQL Pushdown / Remote Execution
-
-Compile semantic queries into SQL or DuckDB.
-
-F. API Exposure
-
-REST, GraphQL, or WASM-based metric service.
-
-⸻
-
-10. Summary
-
-This POC implements a flexible and modern semantic layer architecture:
-	•	Stronger than Tableau’s calc-field model
-	•	More composable than Power BI DAX without calc groups
-	•	Much closer to MicroStrategy’s metric engine
-	•	Inspired by modern tools like LookML, dbt Metrics, MetricFlow
-
-It offers:
-	•	Reusable metric definitions
-	•	Composable time intelligence
-	•	Fact-grain and metric-grain control
-	•	In-memory filter-context evaluation
-	•	A simple but powerful query API
-
-This design is intentionally modular and extensible, forming the basis of a future semantic metrics platform.
-
-
-2. Documentation-style examples
-
-You can reuse these in a README or doc site.
-
-2.1 Defining a simple factMeasure
-
-demoMetrics.totalSalesAmount = {
+```typescript
+metrics.salesByRegion = {
   kind: "factMeasure",
-  name: "totalSalesAmount",
-  description: "Sum of sales amount over the current context.",
   factTable: "sales",
   factColumn: "amount",
-  format: "currency",    // uses fact column’s defaultAgg = sum
+  grain: ["year", "regionId"],  // Ignores month and productId filters
+  format: "currency"
 };
+```
 
-2.2 Defining an expression metric
+**Example:**
+- Query filters: `{ year: 2025, month: 2, regionId: 'NA', productId: 1 }`
+- Metric grain: `['year', 'regionId']`
+- **Result:** Month and productId filters are ignored for this metric
 
-demoMetrics.pricePerUnit = {
-  kind: "expression",
-  name: "pricePerUnit",
-  description: "Sales amount / quantity over the current context.",
-  factTable: "sales",
-  format: "currency",
-  expression: (q) => {
-    const amount = q.sum((r: Row) => Number(r.amount ?? 0));
-    const qty = q.sum((r: Row) => Number(r.quantity ?? 0));
-    return qty ? amount / qty : null;
-  },
-};
+This enables "level metrics" (MicroStrategy) or "dimension pinning" patterns.
 
-2.3 Defining a derived metric
+## Filter Context
 
-demoMetrics.salesVsBudgetPct = {
-  kind: "derived",
-  name: "salesVsBudgetPct",
-  description: "Total sales / total budget.",
-  dependencies: ["totalSalesAmount", "totalBudget"],
-  format: "percent",
-  evalFromDeps: ({ totalSalesAmount, totalBudget }) => {
-    const s = totalSalesAmount ?? 0;
-    const b = totalBudget ?? 0;
-    if (!b) return null;
-    return (s / b) * 100;
-  },
-};
+The engine supports flexible filter expressions:
 
-2.4 Defining a context-transform time-int metric
+```typescript
+// Exact match
+{ year: 2025, regionId: 'NA' }
 
-addContextTransformMetric(demoMetrics, {
-  name: "salesAmountYTD",
-  baseMeasure: "totalSalesAmount",
-  transform: "ytd",
-  description: "YTD of total sales amount.",
-  format: "currency",
-});
+// Range filter
+{ month: { from: 1, to: 3 } }
 
-ytd is defined in demoTransforms and can be reused for any metric.
+// Comparison filters
+{ month: { lte: 6 } }           // month <= 6
+{ amount: { gte: 100, lt: 1000 } }  // 100 <= amount < 1000
+```
 
-2.5 Running a query
+Filters are automatically applied based on each metric's grain.
 
-const rows = runQuery(
-  demoDb,
-  demoFactTables,
-  demoMetrics,
-  demoTransforms,
-  demoDimensionConfig,
-  {
-    rows: ["regionId", "productId"],
-    filters: { year: 2025, month: 2 },
-    metrics: ["totalSalesAmount", "salesAmountYTD", "totalBudget"],
-    factForRows: "sales",
-  }
-);
+## Future Enhancements (Phase 3)
 
-console.table(rows);
+Potential extensions to consider:
 
+### A. Hierarchies
+- Year → Quarter → Month → Day
+- Region → Country → State → City
+- Automatic drill-down/roll-up
 
+### B. Pivot Grids
+- MicroStrategy-style grid format
+- Rows × Columns × Metrics
+- Subtotals and grand totals
 
+### C. Calculation Templates
+- Percent of total
+- Moving averages (7-day, 30-day)
+- Rank (dense, ordinal, percentile)
+- Running totals
+
+### D. Multi-Fact Queries
+- Fact stitching via conformed dimensions
+- Automatic join path detection
+- Cross-fact derived metrics
+
+### E. SQL Pushdown
+- Compile semantic queries to SQL
+- DuckDB integration for larger datasets
+- Query optimization and caching
+
+### F. API Exposure
+- REST API for metric evaluation
+- GraphQL schema generation
+- WASM-based embedding
+
+## Design Philosophy
+
+This engine demonstrates several key architectural principles:
+
+1. **Declarative over Imperative** — Metrics are data structures, not functions
+2. **Composability** — Small, reusable pieces (transforms, measures, metrics)
+3. **Separation of Concerns** — Storage ≠ Semantics ≠ Business Logic
+4. **Type Safety** — Leverage TypeScript for correctness
+5. **Lazy Evaluation** — LINQ.js enumerables don't execute until needed
+6. **Testability** — Pure functions, no side effects, comprehensive tests
+
+## Comparison to Other Tools
+
+| Feature | This Engine | Tableau | Power BI | MicroStrategy | LookML |
+|---------|-------------|---------|----------|---------------|--------|
+| Metric-level grain | ✅ | ❌ | ⚠️ (Calc Groups) | ✅ | ✅ |
+| Composable time-int | ✅ | ⚠️ (Table calcs) | ⚠️ (DAX patterns) | ✅ | ✅ |
+| Derived metrics | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Expression metrics | ✅ | ✅ | ✅ | ✅ | ⚠️ (Limited) |
+| Type-safe definitions | ✅ | ❌ | ❌ | ❌ | ⚠️ (YAML) |
+| In-memory POC | ✅ | ❌ | ❌ | ❌ | ❌ |
+
+## Contributing
+
+This is a proof-of-concept project demonstrating semantic layer architecture. Contributions welcome!
+
+## License
+
+MIT
+
+## References
+
+- [LINQ.js Documentation](https://github.com/mihaifm/linq)
+- [MicroStrategy Metrics](https://www2.microstrategy.com/producthelp/Current/MSTRWeb/WebHelp/Lang_1033/Content/metrics.htm)
+- [LookML Reference](https://cloud.google.com/looker/docs/what-is-lookml)
+- [MetricFlow](https://docs.getdbt.com/docs/build/about-metricflow)
+- [Power BI DAX](https://learn.microsoft.com/en-us/dax/)
+
+---
+
+**Built with ❤️ as a demonstration of modern semantic layer architecture**
