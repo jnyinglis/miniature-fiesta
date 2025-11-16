@@ -404,9 +404,182 @@ Inspired by:
 
 ---
 
-**Status**: All refactoring phases complete ✅
+**Status**: Phase 5 Composable Query Engine implemented ✅
 - Phase 1: LINQ.js Integration
 - Phase 2: Three-Layer Architecture
 - Phase 3: Legacy API Removal
+- **Phase 5: Composable Query Engine** ⭐
+
+## Phase 5: Composable Query Engine
+
+Phase 5 introduces major architectural improvements focused on composability and functional programming patterns:
+
+### Query Builder Pattern
+
+Build queries incrementally with a fluent API:
+
+```typescript
+import { createEngine, demoDb, demoSemanticModel } from './semanticEngine';
+
+// Create engine from semantic model
+const engine = createEngine(demoDb, demoSemanticModel);
+
+// Build reusable base queries
+const base2025 = engine.query().where({ year: 2025 });
+
+// Extend and compose
+const feb2025ByRegion = base2025
+  .where({ month: 2 })
+  .addAttributes('regionId')
+  .addMetrics('revenue', 'budget', 'salesVsBudgetPct')
+  .run();
+
+// CTE-style composition
+const naSales = base2025.where({ regionId: 'NA' });
+const euSales = base2025.where({ regionId: 'EU' });
+```
+
+### Functional Metrics
+
+Metrics are now first-class functions for better composition:
+
+```typescript
+import { simpleMetric, derivedMetric, contextTransformMetric } from './semanticEngine';
+
+// Simple metric
+const revenue = simpleMetric({
+  name: 'revenue',
+  measure: 'salesAmount',
+  format: 'currency'
+});
+
+// Derived metric
+const salesVsBudgetPct = derivedMetric({
+  name: 'salesVsBudgetPct',
+  deps: ['revenue', 'budget'],
+  combine: ({ revenue, budget }) =>
+    budget ? (revenue! / budget) * 100 : null
+});
+
+// Higher-order metrics
+const revenueYTD = makeYtdMetric('revenue', ytdTransform);
+const revenueYoY = makeYoYMetric('revenue');
+```
+
+### Composable Transforms
+
+Time intelligence transforms are now stackable:
+
+```typescript
+import { composeTransforms, shiftYear, shiftMonth, rollingMonths } from './semanticEngine';
+
+// Compose transforms
+const ytdLastYear = composeTransforms(ytd, lastYear);
+const priorMonthLastYear = composeTransforms(priorMonth, lastYear);
+
+// Parameterized transforms
+const rolling3Months = rollingMonths(3);
+const rolling6Months = rollingMonths(6);
+```
+
+### Filter Expression Language
+
+Build complex filters with AND/OR/NOT logic:
+
+```typescript
+import { f } from './semanticEngine';
+
+// Complex nested filters
+const validSales = f.and(
+  f.eq('year', 2025),
+  f.between('amount', 100, 1000),
+  f.or(
+    f.eq('regionId', 'NA'),
+    f.eq('regionId', 'EU')
+  ),
+  f.not(f.eq('status', 'cancelled'))
+);
+
+// Reusable filter fragments
+const baseFilter = f.and(
+  f.eq('year', 2025),
+  f.between('amount', 100, 500)
+);
+
+const naFilter = f.and(baseFilter, f.eq('regionId', 'NA'));
+```
+
+### DSL Helpers
+
+Reduce boilerplate with builder helpers:
+
+```typescript
+import { attr, measure, metric } from './semanticEngine';
+
+// Concise attribute definitions
+const attributes = {
+  regionId: attr.id({
+    name: 'regionId',
+    table: 'sales',
+    displayName: 'regionName'
+  }),
+
+  quantityBand: attr.derived({
+    name: 'quantityBand',
+    table: 'sales',
+    column: 'quantity',
+    expression: (row) => {
+      const q = row.quantity;
+      if (q <= 5) return 'Small';
+      if (q <= 10) return 'Medium';
+      return 'Large';
+    }
+  })
+};
+
+// Concise measure definitions
+const measures = {
+  salesAmount: measure.sum({
+    name: 'salesAmount',
+    table: 'sales',
+    column: 'amount',
+    format: 'currency'
+  }),
+
+  orderCount: measure.count({
+    name: 'orderCount',
+    table: 'sales'
+  })
+};
+```
+
+### Model/Engine Separation
+
+Clean separation between model definition and runtime:
+
+```typescript
+import { createEngine, SemanticModel } from './semanticEngine';
+
+// Define model once
+const salesModel: SemanticModel = {
+  tables: demoTableDefinitions,
+  attributes: demoAttributes,
+  measures: demoMeasures,
+  metrics: demoMetrics,
+  transforms: demoTransforms
+};
+
+// Create engine
+const engine = createEngine(demoDb, salesModel);
+
+// Extend for specific use cases
+const extendedEngine = engine.extend({
+  metrics: {
+    ...additionalMetrics
+  }
+});
+```
+
+For complete Phase 5 specification, see [PHASE_5.md](PHASE_5.md).
 
 For historical context and detailed migration information, see [REFACTOR_SPEC.md](REFACTOR_SPEC.md).

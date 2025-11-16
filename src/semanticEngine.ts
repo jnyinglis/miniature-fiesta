@@ -28,6 +28,179 @@ export interface FilterRange {
 export type FilterValue = FilterPrimitive | FilterRange;
 export type FilterContext = Record<string, FilterValue>;
 
+/* --------------------------------------------------------------------------
+ * Phase 5: Filter Expression Language
+ * AST-based composable filters with AND/OR/NOT logic
+ * -------------------------------------------------------------------------- */
+
+export type ScalarOp = 'eq' | 'lt' | 'lte' | 'gt' | 'gte' | 'between' | 'in';
+
+/**
+ * Filter expression node (leaf node in the filter tree)
+ */
+export interface FilterExpression {
+  kind: 'expression';
+  field: string;
+  op: ScalarOp;
+  value: any;
+  value2?: any; // for 'between'
+}
+
+/**
+ * Filter conjunction (AND/OR)
+ */
+export interface FilterConjunction {
+  kind: 'and' | 'or';
+  filters: Filter[];
+}
+
+/**
+ * Filter negation (NOT)
+ */
+export interface FilterNegation {
+  kind: 'not';
+  filter: Filter;
+}
+
+/**
+ * Filter AST type
+ */
+export type Filter = FilterExpression | FilterConjunction | FilterNegation;
+
+/**
+ * Filter builder API
+ */
+export const f = {
+  eq: (field: string, value: any): FilterExpression => ({
+    kind: 'expression',
+    field,
+    op: 'eq',
+    value
+  }),
+
+  lt: (field: string, value: any): FilterExpression => ({
+    kind: 'expression',
+    field,
+    op: 'lt',
+    value
+  }),
+
+  lte: (field: string, value: any): FilterExpression => ({
+    kind: 'expression',
+    field,
+    op: 'lte',
+    value
+  }),
+
+  gt: (field: string, value: any): FilterExpression => ({
+    kind: 'expression',
+    field,
+    op: 'gt',
+    value
+  }),
+
+  gte: (field: string, value: any): FilterExpression => ({
+    kind: 'expression',
+    field,
+    op: 'gte',
+    value
+  }),
+
+  between: (field: string, from: any, to: any): FilterExpression => ({
+    kind: 'expression',
+    field,
+    op: 'between',
+    value: from,
+    value2: to
+  }),
+
+  in: (field: string, values: any[]): FilterExpression => ({
+    kind: 'expression',
+    field,
+    op: 'in',
+    value: values
+  }),
+
+  and: (...filters: Filter[]): FilterConjunction => ({
+    kind: 'and',
+    filters
+  }),
+
+  or: (...filters: Filter[]): FilterConjunction => ({
+    kind: 'or',
+    filters
+  }),
+
+  not: (filter: Filter): FilterNegation => ({
+    kind: 'not',
+    filter
+  })
+};
+
+/**
+ * Compile a filter AST into a predicate function
+ */
+export function compileFilter(filter: Filter): (row: Row) => boolean {
+  switch (filter.kind) {
+    case 'expression': {
+      const { field, op, value, value2 } = filter;
+      return (row: Row) => {
+        const fieldValue = row[field];
+        switch (op) {
+          case 'eq':
+            return fieldValue === value;
+          case 'lt':
+            return fieldValue < value;
+          case 'lte':
+            return fieldValue <= value;
+          case 'gt':
+            return fieldValue > value;
+          case 'gte':
+            return fieldValue >= value;
+          case 'between':
+            return fieldValue >= value && fieldValue <= value2!;
+          case 'in':
+            return (value as any[]).includes(fieldValue);
+          default:
+            const exhaustiveCheck: never = op;
+            throw new Error(`Unknown operator: ${exhaustiveCheck}`);
+        }
+      };
+    }
+
+    case 'and': {
+      const predicates = filter.filters.map(compileFilter);
+      return (row: Row) => predicates.every(p => p(row));
+    }
+
+    case 'or': {
+      const predicates = filter.filters.map(compileFilter);
+      return (row: Row) => predicates.some(p => p(row));
+    }
+
+    case 'not': {
+      const predicate = compileFilter(filter.filter);
+      return (row: Row) => !predicate(row);
+    }
+
+    default: {
+      const exhaustiveCheck: never = filter;
+      throw new Error(`Unknown filter kind: ${(exhaustiveCheck as any).kind}`);
+    }
+  }
+}
+
+/**
+ * Apply filter AST to rows
+ */
+export function applyFilter(
+  rows: Enumerable.IEnumerable<Row>,
+  filter: Filter
+): Enumerable.IEnumerable<Row> {
+  const predicate = compileFilter(filter);
+  return rows.where(predicate);
+}
+
 /**
  * Table definition: describes a table's schema and relationships.
  * Phase 2: Unified table model - no distinction between dimensions and facts.
@@ -180,6 +353,44 @@ export type MetricDefinition =
  */
 export type MetricRegistry = Record<string, MetricDefinition>;
 
+/* --------------------------------------------------------------------------
+ * Phase 5: New Functional Metric System
+ * Unified metric interface using function composition
+ * -------------------------------------------------------------------------- */
+
+/**
+ * Phase 5: Metric context passed to metric evaluation functions
+ */
+export interface MetricContext {
+  filter: FilterContext;
+  grain: string[];
+  db: InMemoryDb;
+  measureRegistry: MeasureRegistry;
+  metricRegistry: MetricDefRegistry;
+}
+
+/**
+ * Phase 5: Metric evaluation function signature
+ */
+export type MetricEval = (ctx: MetricContext) => number | null;
+
+/**
+ * Phase 5: New unified metric definition
+ * All metrics are now just functions with metadata
+ */
+export interface MetricDef {
+  name: string;
+  eval: MetricEval;
+  deps?: string[];
+  description?: string;
+  format?: string;
+}
+
+/**
+ * Phase 5: New metric registry type (functional)
+ */
+export type MetricDefRegistry = Record<string, MetricDef>;
+
 /**
  * Context-transform functions (time intelligence, etc.).
  * Input: current filter context
@@ -187,6 +398,469 @@ export type MetricRegistry = Record<string, MetricDefinition>;
  */
 export type ContextTransformFn = (ctx: FilterContext) => FilterContext;
 export type ContextTransformsRegistry = Record<string, ContextTransformFn>;
+
+/**
+ * Phase 5: Compose multiple transforms into a single transform
+ * Transforms are applied left to right (first transform runs first)
+ */
+export const composeTransforms = (
+  ...transforms: ContextTransformFn[]
+): ContextTransformFn => {
+  return (ctx: FilterContext) => {
+    return transforms.reduce((acc, t) => t(acc), ctx);
+  };
+};
+
+/**
+ * Phase 5: Parameterized transform builders
+ */
+
+// Shift year by a given offset
+export const shiftYear = (offset: number): ContextTransformFn =>
+  (ctx: FilterContext) => {
+    if (ctx.year == null) return ctx;
+    return { ...ctx, year: Number(ctx.year) + offset };
+  };
+
+// Shift month by a given offset
+export const shiftMonth = (offset: number): ContextTransformFn =>
+  (ctx: FilterContext) => {
+    if (ctx.month == null) return ctx;
+    return { ...ctx, month: Number(ctx.month) + offset };
+  };
+
+// Rolling window of N months
+export const rollingMonths = (count: number): ContextTransformFn =>
+  (ctx: FilterContext) => {
+    if (ctx.month == null) return ctx;
+    const currentMonth = Number(ctx.month);
+    return {
+      ...ctx,
+      month: { gte: currentMonth - count + 1, lte: currentMonth }
+    };
+  };
+
+/* --------------------------------------------------------------------------
+ * Phase 5: Metric Constructor Functions
+ * Factory functions for creating functional metrics
+ * -------------------------------------------------------------------------- */
+
+/**
+ * Phase 5: Helper to evaluate a measure in a given context
+ */
+export function evaluateMeasure(
+  measureName: string,
+  ctx: MetricContext
+): number | null {
+  const measureDef = ctx.measureRegistry[measureName];
+  if (!measureDef) {
+    throw new Error(`Unknown measure: ${measureName}`);
+  }
+
+  const rows = ctx.db.tables[measureDef.table];
+  if (!rows) {
+    throw new Error(`Missing rows for table: ${measureDef.table}`);
+  }
+
+  const filteredRows = applyContextToFact(rows, ctx.filter, ctx.grain);
+
+  if (measureDef.expression) {
+    return measureDef.expression(filteredRows);
+  }
+
+  const col = measureDef.column;
+  switch (measureDef.aggregation) {
+    case "sum":
+      return filteredRows.sum((r: Row) => Number(r[col] ?? 0));
+    case "avg":
+      return filteredRows.average((r: Row) => Number(r[col] ?? 0));
+    case "count":
+      return filteredRows.count();
+    case "min":
+      return filteredRows.min((r: Row) => Number(r[col] ?? 0));
+    case "max":
+      return filteredRows.max((r: Row) => Number(r[col] ?? 0));
+    case "distinct":
+      return filteredRows.distinct((r: Row) => r[col]).count();
+    default:
+      throw new Error(`Unsupported aggregation: ${measureDef.aggregation}`);
+  }
+}
+
+/**
+ * Phase 5: Helper to evaluate metric dependencies
+ */
+export function evaluateDependencies(
+  deps: string[],
+  ctx: MetricContext
+): Record<string, number | null> {
+  const depValues: Record<string, number | null> = {};
+  for (const dep of deps) {
+    const depMetric = ctx.metricRegistry[dep];
+    if (!depMetric) {
+      throw new Error(`Unknown dependency metric: ${dep}`);
+    }
+    depValues[dep] = depMetric.eval(ctx);
+  }
+  return depValues;
+}
+
+/**
+ * Phase 5: Simple metric constructor
+ * Wraps a measure from the measure registry
+ */
+export function simpleMetric(opts: {
+  name: string;
+  measure: string;
+  grain?: string[];
+  description?: string;
+  format?: string;
+}): MetricDef {
+  return {
+    name: opts.name,
+    description: opts.description ?? `Simple metric wrapping ${opts.measure}`,
+    format: opts.format,
+    eval: (ctx: MetricContext) => {
+      const grain = opts.grain ?? ctx.grain;
+      return evaluateMeasure(
+        opts.measure,
+        { ...ctx, grain }
+      );
+    }
+  };
+}
+
+/**
+ * Phase 5: Expression metric constructor
+ * Evaluates a custom expression over filtered rows
+ */
+export function expressionMetric(opts: {
+  name: string;
+  table: string;
+  grain?: string[];
+  expression: (rows: Enumerable.IEnumerable<Row>, ctx: MetricContext) => number | null;
+  description?: string;
+  format?: string;
+}): MetricDef {
+  return {
+    name: opts.name,
+    description: opts.description,
+    format: opts.format,
+    eval: (ctx: MetricContext) => {
+      const rows = ctx.db.tables[opts.table];
+      if (!rows) {
+        throw new Error(`Missing rows for table: ${opts.table}`);
+      }
+
+      const grain = opts.grain ?? Object.keys(rows[0] || {});
+      const filteredRows = applyContextToFact(rows, ctx.filter, grain);
+      return opts.expression(filteredRows, ctx);
+    }
+  };
+}
+
+/**
+ * Phase 5: Derived metric constructor
+ * Combines values from other metrics
+ */
+export function derivedMetric(opts: {
+  name: string;
+  deps: string[];
+  combine: (values: Record<string, number | null>) => number | null;
+  description?: string;
+  format?: string;
+}): MetricDef {
+  return {
+    name: opts.name,
+    deps: opts.deps,
+    description: opts.description,
+    format: opts.format,
+    eval: (ctx: MetricContext) => {
+      const depValues = evaluateDependencies(opts.deps, ctx);
+      return opts.combine(depValues);
+    }
+  };
+}
+
+/**
+ * Phase 5: Context transform metric constructor
+ * Applies a transform to the context before evaluating a base metric
+ */
+export function contextTransformMetric(opts: {
+  name: string;
+  baseMetric: string;
+  transform: ContextTransformFn;
+  description?: string;
+  format?: string;
+}): MetricDef {
+  return {
+    name: opts.name,
+    deps: [opts.baseMetric],
+    description: opts.description,
+    format: opts.format,
+    eval: (ctx: MetricContext) => {
+      const baseMetric = ctx.metricRegistry[opts.baseMetric];
+      if (!baseMetric) {
+        throw new Error(`Unknown base metric: ${opts.baseMetric}`);
+      }
+
+      const transformedContext: MetricContext = {
+        ...ctx,
+        filter: opts.transform(ctx.filter)
+      };
+
+      return baseMetric.eval(transformedContext);
+    }
+  };
+}
+
+/* --------------------------------------------------------------------------
+ * Phase 5: Higher-Order Metric Builders
+ * -------------------------------------------------------------------------- */
+
+/**
+ * Generate YTD metric for any base metric
+ */
+export function makeYtdMetric(
+  baseName: string,
+  ytdTransform: ContextTransformFn
+): MetricDef {
+  return contextTransformMetric({
+    name: `${baseName}YTD`,
+    baseMetric: baseName,
+    transform: ytdTransform,
+    description: `Year-to-date ${baseName}`
+  });
+}
+
+/**
+ * Generate YoY (Year-over-Year) metric
+ */
+export function makeYoYMetric(baseName: string): MetricDef {
+  return derivedMetric({
+    name: `${baseName}YoY`,
+    deps: [baseName, `${baseName}LastYear`],
+    combine: (values) => {
+      const current = values[baseName];
+      const prior = values[`${baseName}LastYear`];
+      if (prior == null || prior === 0) return null;
+      if (current == null) return null;
+      return ((current - prior) / prior) * 100;
+    },
+    description: `Year-over-year change for ${baseName}`,
+    format: 'percent'
+  });
+}
+
+/* --------------------------------------------------------------------------
+ * Phase 5: DSL Helpers for Definitions
+ * Builder helpers to reduce boilerplate
+ * -------------------------------------------------------------------------- */
+
+/**
+ * Attribute builder helpers
+ */
+export const attr = {
+  /**
+   * Create a simple ID attribute
+   */
+  id: (opts: {
+    name: string;
+    table: string;
+    column?: string;
+    description?: string;
+    displayName?: string;
+  }): AttributeDefinition => ({
+    name: opts.name,
+    table: opts.table,
+    column: opts.column ?? opts.name,
+    description: opts.description,
+    displayName: opts.displayName,
+  }),
+
+  /**
+   * Create a derived attribute with custom expression
+   */
+  derived: (opts: {
+    name: string;
+    table: string;
+    column: string;
+    expression: (row: Row) => any;
+    description?: string;
+  }): AttributeDefinition => ({
+    name: opts.name,
+    table: opts.table,
+    column: opts.column,
+    expression: opts.expression,
+    description: opts.description,
+  }),
+
+  /**
+   * Create a formatted attribute
+   */
+  formatted: (opts: {
+    name: string;
+    table: string;
+    column: string;
+    format: (value: any) => string;
+    description?: string;
+  }): AttributeDefinition => ({
+    name: opts.name,
+    table: opts.table,
+    column: opts.column,
+    format: opts.format,
+    description: opts.description,
+  }),
+};
+
+/**
+ * Measure builder helpers
+ */
+export const measure = {
+  /**
+   * Create a sum measure
+   */
+  sum: (opts: {
+    name: string;
+    table: string;
+    column?: string;
+    format?: string;
+    description?: string;
+  }): MeasureDefinition => ({
+    name: opts.name,
+    table: opts.table,
+    column: opts.column ?? opts.name,
+    aggregation: 'sum',
+    format: opts.format,
+    description: opts.description,
+  }),
+
+  /**
+   * Create an average measure
+   */
+  avg: (opts: {
+    name: string;
+    table: string;
+    column?: string;
+    format?: string;
+    description?: string;
+  }): MeasureDefinition => ({
+    name: opts.name,
+    table: opts.table,
+    column: opts.column ?? opts.name,
+    aggregation: 'avg',
+    format: opts.format,
+    description: opts.description,
+  }),
+
+  /**
+   * Create a count measure
+   */
+  count: (opts: {
+    name: string;
+    table: string;
+    description?: string;
+  }): MeasureDefinition => ({
+    name: opts.name,
+    table: opts.table,
+    column: 'id',
+    aggregation: 'count',
+    format: 'integer',
+    description: opts.description,
+  }),
+
+  /**
+   * Create a min measure
+   */
+  min: (opts: {
+    name: string;
+    table: string;
+    column?: string;
+    format?: string;
+    description?: string;
+  }): MeasureDefinition => ({
+    name: opts.name,
+    table: opts.table,
+    column: opts.column ?? opts.name,
+    aggregation: 'min',
+    format: opts.format,
+    description: opts.description,
+  }),
+
+  /**
+   * Create a max measure
+   */
+  max: (opts: {
+    name: string;
+    table: string;
+    column?: string;
+    format?: string;
+    description?: string;
+  }): MeasureDefinition => ({
+    name: opts.name,
+    table: opts.table,
+    column: opts.column ?? opts.name,
+    aggregation: 'max',
+    format: opts.format,
+    description: opts.description,
+  }),
+};
+
+/**
+ * Metric builder helpers namespace
+ * Combines Phase 5 metric constructors with higher-order builders
+ */
+export const metric = {
+  simple: simpleMetric,
+  derived: derivedMetric,
+  expression: expressionMetric,
+  transform: contextTransformMetric,
+  ytd: makeYtdMetric,
+  yoy: makeYoYMetric,
+};
+
+/**
+ * Phase 5: Semantic Model - bundles all registries together
+ */
+export interface SemanticModel {
+  tables: TableRegistry;
+  attributes: AttributeRegistry;
+  measures: MeasureRegistry;
+  metrics: MetricRegistry;
+  transforms: ContextTransformsRegistry;
+}
+
+/**
+ * Phase 5: Query Builder interface (forward declaration)
+ */
+export interface QueryBuilder {
+  addAttributes(...attrs: string[]): QueryBuilder;
+  addMetrics(...metrics: string[]): QueryBuilder;
+  where(partial: FilterContext): QueryBuilder;
+  build(): QuerySpec;
+  run(): Row[];
+}
+
+/**
+ * Phase 5: Query specification
+ */
+export interface QuerySpec {
+  attributes: string[];
+  metrics: string[];
+  filters?: FilterContext;
+}
+
+/**
+ * Phase 5: Engine interface - provides query capabilities over a semantic model
+ */
+export interface Engine {
+  query(): QueryBuilder;
+  getMetric(name: string): MetricDefinition | undefined;
+  listMetrics(): MetricDefinition[];
+  getMeasure(name: string): MeasureDefinition | undefined;
+  getAttribute(name: string): AttributeDefinition | undefined;
+  extend(partial: Partial<SemanticModel>): Engine;
+}
 
 /**
  * Formatting helper: interpret a numeric value using metric format.
@@ -564,6 +1238,110 @@ export function runQuery(
 }
 
 /* --------------------------------------------------------------------------
+ * Phase 5: Query Builder and Engine Implementation
+ * -------------------------------------------------------------------------- */
+
+/**
+ * QueryBuilder implementation with immutable builder pattern
+ */
+class QueryBuilderImpl implements QueryBuilder {
+  private spec: QuerySpec;
+
+  constructor(
+    private db: InMemoryDb,
+    private model: SemanticModel,
+    spec?: QuerySpec
+  ) {
+    this.spec = spec || {
+      attributes: [],
+      metrics: [],
+      filters: {}
+    };
+  }
+
+  addAttributes(...attrs: string[]): QueryBuilder {
+    return new QueryBuilderImpl(this.db, this.model, {
+      ...this.spec,
+      attributes: [...this.spec.attributes, ...attrs]
+    });
+  }
+
+  addMetrics(...metrics: string[]): QueryBuilder {
+    return new QueryBuilderImpl(this.db, this.model, {
+      ...this.spec,
+      metrics: [...this.spec.metrics, ...metrics]
+    });
+  }
+
+  where(partial: FilterContext): QueryBuilder {
+    return new QueryBuilderImpl(this.db, this.model, {
+      ...this.spec,
+      filters: { ...this.spec.filters, ...partial }
+    });
+  }
+
+  build(): QuerySpec {
+    return { ...this.spec };
+  }
+
+  run(): Row[] {
+    return runQuery(
+      this.db,
+      this.model.tables,
+      this.model.attributes,
+      this.model.measures,
+      this.model.metrics,
+      this.model.transforms,
+      {
+        attributes: this.spec.attributes,
+        filters: this.spec.filters,
+        metrics: this.spec.metrics
+      }
+    );
+  }
+}
+
+/**
+ * Phase 5: Create an Engine instance from a database and semantic model
+ */
+export function createEngine(
+  db: InMemoryDb,
+  model: SemanticModel
+): Engine {
+  return {
+    query(): QueryBuilder {
+      return new QueryBuilderImpl(db, model);
+    },
+
+    getMetric(name: string): MetricDefinition | undefined {
+      return model.metrics[name];
+    },
+
+    listMetrics(): MetricDefinition[] {
+      return Object.values(model.metrics);
+    },
+
+    getMeasure(name: string): MeasureDefinition | undefined {
+      return model.measures[name];
+    },
+
+    getAttribute(name: string): AttributeDefinition | undefined {
+      return model.attributes[name];
+    },
+
+    extend(partial: Partial<SemanticModel>): Engine {
+      return createEngine(db, {
+        tables: partial.tables ?? model.tables,
+        attributes: { ...model.attributes, ...(partial.attributes || {}) },
+        measures: { ...model.measures, ...(partial.measures || {}) },
+        metrics: { ...model.metrics, ...(partial.metrics || {}) },
+        transforms: { ...model.transforms, ...(partial.transforms || {}) }
+      });
+    }
+  };
+}
+
+/* --------------------------------------------------------------------------
  * BELOW: POC DATA + METRIC REGISTRY + DEMO USAGE
  * You can move this into a separate file in a real project.
  * -------------------------------------------------------------------------- */
@@ -762,24 +1540,36 @@ export const demoMeasures: MeasureRegistry = {
 
 /**
  * Example context transforms (time intelligence).
+ * Phase 5: Refactored to use composable transforms
  */
+
+// Base transforms
+const ytd: ContextTransformFn = (ctx) => {
+  if (ctx.year == null || ctx.month == null) return ctx;
+  return { ...ctx, month: { lte: Number(ctx.month) } };
+};
+
+const lastYear: ContextTransformFn = (ctx) => {
+  if (ctx.year == null) return ctx;
+  return { ...ctx, year: Number(ctx.year) - 1 };
+};
+
+const priorMonth: ContextTransformFn = (ctx) => {
+  if (ctx.month == null) return ctx;
+  return { ...ctx, month: Number(ctx.month) - 1 };
+};
+
+// Phase 5: Composed transforms using composeTransforms helper
 export const demoTransforms: ContextTransformsRegistry = {
-  ytd(ctx) {
-    if (ctx.year == null || ctx.month == null) return ctx;
-    return { ...ctx, month: { lte: Number(ctx.month) } };
-  },
-  lastYear(ctx) {
-    if (ctx.year == null) return ctx;
-    return { ...ctx, year: Number(ctx.year) - 1 };
-  },
-  ytdLastYear(ctx) {
-    if (ctx.year == null || ctx.month == null) return ctx;
-    return {
-      ...ctx,
-      year: Number(ctx.year) - 1,
-      month: { lte: Number(ctx.month) },
-    };
-  },
+  ytd,
+  lastYear,
+  priorMonth,
+  ytdLastYear: composeTransforms(ytd, lastYear),
+  priorMonthLastYear: composeTransforms(priorMonth, lastYear),
+
+  // Parameterized transforms
+  rolling3Months: rollingMonths(3),
+  rolling6Months: rollingMonths(6),
 };
 
 /**
@@ -919,6 +1709,22 @@ function buildDemoMetrics() {
 buildDemoMetrics();
 
 /**
+ * Phase 5: Demo semantic model bundling all registries
+ */
+export const demoSemanticModel: SemanticModel = {
+  tables: demoTableDefinitions,
+  attributes: demoAttributes,
+  measures: demoMeasures,
+  metrics: demoMetrics,
+  transforms: demoTransforms
+};
+
+/**
+ * Phase 5: Demo engine instance
+ */
+export const demoEngine = createEngine(demoDb, demoSemanticModel);
+
+/**
  * DEMO USAGE
  *
  * This is just to illustrate. In a real application you'd likely:
@@ -992,4 +1798,32 @@ if (typeof require !== "undefined" && typeof module !== "undefined" && require.m
   );
   // eslint-disable-next-line no-console
   console.table(result3);
+
+  // Phase 5: Demo new Query Builder pattern
+  console.log("\n=== Phase 5 Demo: Query Builder Pattern ===");
+
+  // Reusable base query
+  const base2025 = demoEngine.query().where({ year: 2025 });
+
+  // Extend and reuse
+  const feb2025ByRegion = base2025
+    .where({ month: 2 })
+    .addAttributes('regionId')
+    .addMetrics('revenue', 'budget', 'salesVsBudgetPct')
+    .run();
+
+  console.log("\n=== Phase 5: Feb 2025 by Region (using Query Builder) ===");
+  console.table(feb2025ByRegion);
+
+  // CTE-style reusable partials
+  const naSales = base2025.where({ regionId: 'NA' });
+  const euSales = base2025.where({ regionId: 'EU' });
+
+  const naResult = naSales
+    .addAttributes('regionId', 'productId')
+    .addMetrics('revenue', 'quantity')
+    .run();
+
+  console.log("\n=== Phase 5: NA Sales 2025 (CTE-style) ===");
+  console.table(naResult);
 }
