@@ -17,7 +17,7 @@ This document outlines the comprehensive test plan for validating the Phase 1 re
 2. **Filter Matching** - Tests filter application logic
 3. **Context Application** - Tests context filtering on fact tables
 4. **Utility Functions** - Tests helper functions
-5. **FactMeasure Metrics** - Tests simple aggregation metrics
+5. **Simple Metrics** - Tests simple aggregation metrics
 6. **Expression Metrics** - Tests custom expression metrics
 7. **Derived Metrics** - Tests metrics that depend on other metrics
 8. **Context Transform Metrics** - Tests time intelligence
@@ -193,13 +193,9 @@ Validate that `applyContextToFact()` correctly filters rows based on context and
 - `formatValue(45.67, 'percent')` → `"45.67%"`
 - `formatValue(null, 'currency')` → `null`
 
-#### 4.3: enrichDimensions() Function
-**Input:** `{ regionId: 'NA', productId: 1 }`
-**Expected:** Adds `regionName: 'North America'` and `productName: 'Widget A'`
-
 ---
 
-## Test Suite 5: FactMeasure Metrics
+## Test Suite 5: Simple Metrics
 
 ### Purpose
 Validate simple aggregation metrics using LINQ.js.
@@ -448,9 +444,9 @@ Enumerable.from(salesData)
 
 ### Backward Compatibility
 - [x] All existing queries produce identical results
-- [x] All metric types still supported (factMeasure, expression, derived, contextTransform)
+- [x] All metric types still supported (simple, expression, derived, contextTransform)
 - [x] Filter matching unchanged
-- [x] Dimension enrichment unchanged
+- [x] Attribute display name resolution working
 - [x] Formatting unchanged
 
 ### New Capabilities

@@ -1,5 +1,5 @@
 // semanticEngine.ts
-// POC semantic metrics engine with factMeasure, expression, derived, contextTransform
+// POC semantic metrics engine with simple, expression, derived, contextTransform
 //
 // This version uses LINQ.js for powerful, composable query operations.
 // LINQ.js provides 100+ operators for filtering, projection, aggregation, and more.
