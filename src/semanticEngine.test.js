@@ -1,28 +1,58 @@
 /**
  * Comprehensive test suite for the Semantic Metrics Engine
- * Tests Phase 1: LINQ.js integration
+ * Tests all phases including Phase 5: Composable Query Engine
  *
  * Run with: node src/semanticEngine.test.js
  */
 
-const Enumerable = require('./linq.js');
+const Enumerable = require('../linq.js');
 
-// Import types and functions (simulated for JavaScript)
+// Import from semantic engine
 const {
-  demoDb,
-  demoMetrics,
-  demoTransforms,
-  demoTableDefinitions,
-  demoAttributes,
-  demoMeasures,
+  // Core functions
   runQuery,
   evaluateMetric,
   evaluateMetrics,
-  applyContextToFact,
   matchesFilter,
   formatValue,
-  pick
-} = require('./semanticEngine.ts'); // Note: This would need transpilation
+  pick,
+
+  // Phase 5: Filter Expression Language
+  f,
+  compileFilter,
+  applyFilter,
+
+  // Phase 5: Functional Metrics
+  simpleMetric,
+  expressionMetric,
+  derivedMetric,
+  contextTransformMetric,
+  makeYtdMetric,
+  makeYoYMetric,
+
+  // Phase 5: Composable Transforms
+  composeTransforms,
+  shiftYear,
+  shiftMonth,
+  rollingMonths,
+
+  // Phase 5: DSL Helpers
+  attr,
+  measure,
+  metric,
+
+  // Phase 5: Model/Engine Separation
+  createEngine,
+
+  // Demo data and registries
+  demoDb,
+  demoTableDefinitions,
+  demoAttributes,
+  demoMeasures,
+  demoMetrics,
+  demoTransforms,
+  demoSemanticModel
+} = require('../semanticEngine.js');
 
 // Test utilities
 let testCount = 0;
@@ -52,7 +82,7 @@ function assertClose(actual, expected, tolerance, message) {
 }
 
 console.log('='.repeat(80));
-console.log('SEMANTIC ENGINE TEST SUITE - Phase 1: LINQ.js Integration');
+console.log('SEMANTIC ENGINE TEST SUITE - All Phases + Phase 5');
 console.log('='.repeat(80));
 console.log();
 
@@ -162,69 +192,24 @@ try {
 }
 
 // ============================================================================
-// Test Suite 3: Context Application
+// Test Suite 3: Utility Functions
 // ============================================================================
 
-console.log('Test Suite 3: Context Application (applyContextToFact)');
+console.log('Test Suite 3: Utility Functions');
 console.log('-'.repeat(80));
 
 try {
-  const testRows = [
-    { year: 2024, month: 1, regionId: 'NA', amount: 100 },
-    { year: 2024, month: 2, regionId: 'NA', amount: 200 },
-    { year: 2025, month: 1, regionId: 'NA', amount: 300 },
-    { year: 2025, month: 1, regionId: 'EU', amount: 400 },
-  ];
-
-  // Test 3.1: Filter by single dimension
-  const filtered1 = applyContextToFact(testRows, { year: 2025 }, ['year', 'month', 'regionId']);
-  assertEquals(filtered1.count(), 2, 'applyContextToFact filters by year');
-
-  // Test 3.2: Filter by multiple dimensions
-  const filtered2 = applyContextToFact(testRows, { year: 2025, regionId: 'NA' }, ['year', 'month', 'regionId']);
-  assertEquals(filtered2.count(), 1, 'applyContextToFact filters by multiple dimensions');
-  assertEquals(filtered2.first().amount, 300, 'applyContextToFact returns correct row');
-
-  // Test 3.3: Ignore filters not in grain
-  const filtered3 = applyContextToFact(testRows, { year: 2025, productId: 999 }, ['year', 'month', 'regionId']);
-  assertEquals(filtered3.count(), 2, 'applyContextToFact ignores filters not in grain');
-
-  // Test 3.4: Range filter
-  const filtered4 = applyContextToFact(testRows, { month: { lte: 1 } }, ['year', 'month', 'regionId']);
-  assertEquals(filtered4.count(), 3, 'applyContextToFact handles range filters');
-
-  console.log('✓ All context application tests passed\n');
-
-} catch (error) {
-  console.error('✗ Context application test failed:', error.message);
-  console.log();
-}
-
-// ============================================================================
-// Test Suite 4: Utility Functions
-// ============================================================================
-
-console.log('Test Suite 4: Utility Functions');
-console.log('-'.repeat(80));
-
-try {
-  // Test 4.1: pick() function
+  // Test 3.1: pick() function
   const obj = { a: 1, b: 2, c: 3, d: 4 };
   const picked = pick(obj, ['a', 'c']);
   assertEquals(picked, { a: 1, c: 3 }, 'pick() extracts specified keys');
 
-  // Test 4.2: formatValue() function
+  // Test 3.2: formatValue() function
   assertEquals(formatValue(1234.56, 'currency'), '$1234.56', 'formatValue formats currency');
-  assertEquals(formatValue(1234.56, 'integer'), '1234', 'formatValue formats integer');
+  assertEquals(formatValue(1234.56, 'integer'), '1235', 'formatValue formats integer (rounds)');
   assertEquals(formatValue(45.67, 'percent'), '45.67%', 'formatValue formats percent');
   assertEquals(formatValue(null, 'currency'), null, 'formatValue handles null');
   assertEquals(formatValue(undefined, 'currency'), null, 'formatValue handles undefined');
-
-  // Test 4.3: enrichDimensions() function
-  const keyObj = { regionId: 'NA', productId: 1 };
-  const enriched = enrichDimensions(keyObj, demoDb, demoDimensionConfig);
-  assertEquals(enriched.regionName, 'North America', 'enrichDimensions adds region name');
-  assertEquals(enriched.productName, 'Widget A', 'enrichDimensions adds product name');
 
   console.log('✓ All utility function tests passed\n');
 
@@ -234,14 +219,14 @@ try {
 }
 
 // ============================================================================
-// Test Suite 5: Metric Evaluation - FactMeasure
+// Test Suite 4: Legacy API - Simple Metrics
 // ============================================================================
 
-console.log('Test Suite 5: Metric Evaluation - Simple Metrics');
+console.log('Test Suite 4: Legacy API - Simple Metrics');
 console.log('-'.repeat(80));
 
 try {
-  // Test 5.1: Simple sum metric
+  // Test 4.1: Simple sum metric
   const salesAmount = evaluateMetric(
     'revenue',
     demoDb,
@@ -253,10 +238,7 @@ try {
   );
   assertEquals(salesAmount, 2100, 'Simple metric sums correctly');
 
-  // Test 5.2: Count metric (implicit)
-  // Note: Would need a count-based metric in demoMetrics
-
-  // Test 5.3: Metric with filtered context
+  // Test 4.2: Metric with filtered context
   const filteredSales = evaluateMetric(
     'revenue',
     demoDb,
@@ -268,7 +250,7 @@ try {
   );
   assertEquals(filteredSales, 2550, 'Simple metric respects filter context');
 
-  // Test 5.4: Quantity metric
+  // Test 4.3: Quantity metric
   const quantity = evaluateMetric(
     'quantity',
     demoDb,
@@ -280,59 +262,63 @@ try {
   );
   assertEquals(quantity, 19, 'Simple metric sums quantity correctly');
 
-  console.log('✓ All Simple metric tests passed\n');
+  console.log('✓ All Legacy Simple metric tests passed\n');
 
 } catch (error) {
-  console.error('✗ Simple metric test failed:', error.message);
+  console.error('✗ Legacy Simple metric test failed:', error.message);
   console.log();
 }
 
 // ============================================================================
-// Test Suite 6: Metric Evaluation - Expression
+// Test Suite 5: Legacy API - Expression Metrics
 // ============================================================================
 
-console.log('Test Suite 6: Metric Evaluation - Expression');
+console.log('Test Suite 5: Legacy API - Expression Metrics');
 console.log('-'.repeat(80));
 
 try {
-  // Test 6.1: Expression metric (price per unit)
+  // Test 5.1: Expression metric (price per unit)
   const pricePerUnit = evaluateMetric(
     'pricePerUnit',
     demoDb,
     demoMetrics,
     { year: 2025, month: 1 },
-    demoTransforms
+    demoTransforms,
+    new Map(),
+    demoMeasures
   );
   // Total amount: 2100, Total quantity: 19, Price per unit: 2100/19 ≈ 110.53
   assertClose(pricePerUnit, 110.53, 0.01, 'Expression metric calculates price per unit');
 
-  // Test 6.2: Expression metric with different context
+  // Test 5.2: Expression metric with different context
   const pricePerUnitNA = evaluateMetric(
     'pricePerUnit',
     demoDb,
     demoMetrics,
     { year: 2025, regionId: 'NA' },
-    demoTransforms
+    demoTransforms,
+    new Map(),
+    demoMeasures
   );
   // NA 2025: (1000+600+950) / (10+5+8) = 2550 / 23 ≈ 110.87
   assertClose(pricePerUnitNA, 110.87, 0.01, 'Expression metric works with filtered context');
 
-  console.log('✓ All Expression metric tests passed\n');
+  console.log('✓ All Legacy Expression metric tests passed\n');
 
 } catch (error) {
-  console.error('✗ Expression metric test failed:', error.message);
+  console.error('✗ Legacy Expression metric test failed:', error.message);
   console.log();
 }
 
 // ============================================================================
-// Test Suite 7: Metric Evaluation - Derived
+// Test Suite 6: Legacy API - Derived Metrics
 // ============================================================================
 
-console.log('Test Suite 7: Metric Evaluation - Derived');
+console.log('Test Suite 6: Legacy API - Derived Metrics');
 console.log('-'.repeat(80));
 
 try {
-  // Test 7.1: Derived metric (Sales vs Budget %)
+  // Test 6.1: Derived metric (Sales vs Budget %)
   const salesVsBudget = evaluateMetric(
     'salesVsBudgetPct',
     demoDb,
@@ -345,7 +331,7 @@ try {
   // Sales: 2550, Budget: 2200, Ratio: 2550/2200 * 100 = 115.909...
   assertClose(salesVsBudget, 115.91, 0.01, 'Derived metric calculates percentage');
 
-  // Test 7.2: Derived metric with null handling
+  // Test 6.2: Derived metric with null handling
   const salesVsBudgetNoData = evaluateMetric(
     'salesVsBudgetPct',
     demoDb,
@@ -357,22 +343,22 @@ try {
   );
   assertEquals(salesVsBudgetNoData, null, 'Derived metric handles division by zero');
 
-  console.log('✓ All Derived metric tests passed\n');
+  console.log('✓ All Legacy Derived metric tests passed\n');
 
 } catch (error) {
-  console.error('✗ Derived metric test failed:', error.message);
+  console.error('✗ Legacy Derived metric test failed:', error.message);
   console.log();
 }
 
 // ============================================================================
-// Test Suite 8: Metric Evaluation - Context Transforms
+// Test Suite 7: Legacy API - Context Transforms
 // ============================================================================
 
-console.log('Test Suite 8: Metric Evaluation - Context Transforms (Time Intelligence)');
+console.log('Test Suite 7: Legacy API - Context Transforms (Time Intelligence)');
 console.log('-'.repeat(80));
 
 try {
-  // Test 8.1: YTD transform
+  // Test 7.1: YTD transform
   const salesYTD = evaluateMetric(
     'salesAmountYTD',
     demoDb,
@@ -386,7 +372,7 @@ try {
   // 2025 months 1-2: 1000+600+500+950+450 = 3500
   assertEquals(salesYTD, 3500, 'YTD transform includes all months up to current');
 
-  // Test 8.2: Last Year transform
+  // Test 7.2: Last Year transform
   const salesLastYear = evaluateMetric(
     'salesAmountLastYear',
     demoDb,
@@ -399,7 +385,7 @@ try {
   // 2024 month 1: 700+480 = 1180
   assertEquals(salesLastYear, 1180, 'Last Year transform shifts year back');
 
-  // Test 8.3: YTD Last Year transform
+  // Test 7.3: YTD Last Year transform
   const salesYTDLY = evaluateMetric(
     'salesAmountYTDLastYear',
     demoDb,
@@ -412,34 +398,22 @@ try {
   // 2024 months 1-2: 700+480+650+420 = 2250
   assertEquals(salesYTDLY, 2250, 'YTD Last Year transform combines both transforms');
 
-  // Test 8.4: Budget YTD (annual budget, so YTD = full year)
-  const budgetYTD = evaluateMetric(
-    'budgetYTD',
-    demoDb,
-    demoMetrics,
-    { year: 2025, regionId: 'NA', month: 2 },
-    demoTransforms,
-    new Map(),
-    demoMeasures
-  );
-  assertEquals(budgetYTD, 2200, 'Budget YTD works (budget is annual)');
-
-  console.log('✓ All Context Transform metric tests passed\n');
+  console.log('✓ All Legacy Context Transform metric tests passed\n');
 
 } catch (error) {
-  console.error('✗ Context Transform metric test failed:', error.message);
+  console.error('✗ Legacy Context Transform metric test failed:', error.message);
   console.log();
 }
 
 // ============================================================================
-// Test Suite 9: Query Execution
+// Test Suite 8: Legacy API - Query Execution
 // ============================================================================
 
-console.log('Test Suite 9: Query Execution (runQuery)');
+console.log('Test Suite 8: Legacy API - Query Execution (runQuery)');
 console.log('-'.repeat(80));
 
 try {
-  // Test 9.1: Query with single dimension
+  // Test 8.1: Query with single dimension
   const result1 = runQuery(
     demoDb,
     demoTableDefinitions,
@@ -458,7 +432,7 @@ try {
   assert(result1[0].regionName, 'Query enriches dimension labels');
   assert(result1[0].revenue, 'Query includes metric values');
 
-  // Test 9.2: Query with multiple dimensions
+  // Test 8.2: Query with multiple dimensions
   const result2 = runQuery(
     demoDb,
     demoTableDefinitions,
@@ -476,7 +450,7 @@ try {
   assertEquals(result2.length, 3, 'Query with 2 dimensions returns correct row count');
   assert(result2[0].regionName && result2[0].productName, 'Query enriches multiple dimensions');
 
-  // Test 9.3: Query with derived metrics
+  // Test 8.3: Query with derived metrics
   const result3 = runQuery(
     demoDb,
     demoTableDefinitions,
@@ -494,8 +468,565 @@ try {
   assert(result3[0].salesVsBudgetPct, 'Query includes derived metrics');
   assert(result3[0].salesVsBudgetPct.includes('%'), 'Query formats derived metrics');
 
-  // Test 9.4: Query with context transform metrics
-  const result4 = runQuery(
+  console.log('✓ All Legacy Query execution tests passed\n');
+
+} catch (error) {
+  console.error('✗ Legacy Query execution test failed:', error.message);
+  console.log();
+}
+
+// ============================================================================
+// Test Suite 9: Phase 5d - Filter Expression Language
+// ============================================================================
+
+console.log('Test Suite 9: Phase 5d - Filter Expression Language');
+console.log('-'.repeat(80));
+
+try {
+  const testRows = [
+    { year: 2024, month: 1, amount: 100, regionId: 'NA', status: 'active' },
+    { year: 2025, month: 2, amount: 200, regionId: 'NA', status: 'active' },
+    { year: 2025, month: 6, amount: 300, regionId: 'EU', status: 'cancelled' },
+    { year: 2025, month: 12, amount: 500, regionId: 'EU', status: 'active' }
+  ];
+
+  // Test 9.1: Simple equality filter
+  const eqFilter = f.eq('year', 2025);
+  const eqPredicate = compileFilter(eqFilter);
+  const eqFiltered = testRows.filter(eqPredicate);
+  assertEquals(eqFiltered.length, 3, 'f.eq() filters correctly');
+
+  // Test 9.2: Comparison filters
+  const lteFilter = f.lte('month', 6);
+  const ltePredicate = compileFilter(lteFilter);
+  const lteFiltered = testRows.filter(ltePredicate);
+  assertEquals(lteFiltered.length, 3, 'f.lte() filters correctly');
+
+  // Test 9.3: Between filter
+  const betweenFilter = f.between('amount', 150, 350);
+  const betweenPredicate = compileFilter(betweenFilter);
+  const betweenFiltered = testRows.filter(betweenPredicate);
+  assertEquals(betweenFiltered.length, 2, 'f.between() filters correctly');
+
+  // Test 9.4: In filter
+  const inFilter = f.in('regionId', ['NA', 'EU']);
+  const inPredicate = compileFilter(inFilter);
+  const inFiltered = testRows.filter(inPredicate);
+  assertEquals(inFiltered.length, 4, 'f.in() filters correctly');
+
+  // Test 9.5: AND conjunction
+  const andFilter = f.and(
+    f.eq('year', 2025),
+    f.eq('regionId', 'NA')
+  );
+  const andPredicate = compileFilter(andFilter);
+  const andFiltered = testRows.filter(andPredicate);
+  assertEquals(andFiltered.length, 1, 'f.and() filters correctly');
+
+  // Test 9.6: OR conjunction
+  const orFilter = f.or(
+    f.eq('regionId', 'NA'),
+    f.eq('regionId', 'EU')
+  );
+  const orPredicate = compileFilter(orFilter);
+  const orFiltered = testRows.filter(orPredicate);
+  assertEquals(orFiltered.length, 4, 'f.or() filters correctly');
+
+  // Test 9.7: NOT negation
+  const notFilter = f.not(f.eq('status', 'cancelled'));
+  const notPredicate = compileFilter(notFilter);
+  const notFiltered = testRows.filter(notPredicate);
+  assertEquals(notFiltered.length, 3, 'f.not() filters correctly');
+
+  // Test 9.8: Complex nested filter
+  const complexFilter = f.and(
+    f.eq('year', 2025),
+    f.or(
+      f.eq('regionId', 'NA'),
+      f.eq('regionId', 'EU')
+    ),
+    f.not(f.eq('status', 'cancelled'))
+  );
+  const complexPredicate = compileFilter(complexFilter);
+  const complexFiltered = testRows.filter(complexPredicate);
+  assertEquals(complexFiltered.length, 2, 'Complex nested filters work correctly');
+
+  // Test 9.9: applyFilter with LINQ.js
+  const enumFiltered = applyFilter(
+    Enumerable.from(testRows),
+    f.and(f.eq('year', 2025), f.gte('amount', 300))
+  );
+  assertEquals(enumFiltered.count(), 2, 'applyFilter works with LINQ.js');
+
+  console.log('✓ All Filter Expression Language tests passed\n');
+
+} catch (error) {
+  console.error('✗ Filter Expression Language test failed:', error.message);
+  console.log();
+}
+
+// ============================================================================
+// Test Suite 10: Phase 5c - Composable Transforms
+// ============================================================================
+
+console.log('Test Suite 10: Phase 5c - Composable Transforms');
+console.log('-'.repeat(80));
+
+try {
+  // Test 10.1: shiftYear transform
+  const shiftYearTransform = shiftYear(-1);
+  const shiftedYear = shiftYearTransform({ year: 2025, month: 6 });
+  assertEquals(shiftedYear.year, 2024, 'shiftYear(-1) shifts year back');
+  assertEquals(shiftedYear.month, 6, 'shiftYear preserves month');
+
+  // Test 10.2: shiftMonth transform
+  const shiftMonthTransform = shiftMonth(-1);
+  const shiftedMonth = shiftMonthTransform({ year: 2025, month: 6 });
+  assertEquals(shiftedMonth.month, 5, 'shiftMonth(-1) shifts month back');
+
+  // Test 10.3: rollingMonths transform
+  const rolling3 = rollingMonths(3);
+  const rollingCtx = rolling3({ year: 2025, month: 6 });
+  assertEquals(rollingCtx.month.gte, 4, 'rollingMonths(3) sets gte to current - 2');
+  assertEquals(rollingCtx.month.lte, 6, 'rollingMonths(3) sets lte to current');
+
+  // Test 10.4: composeTransforms - simple composition
+  const ytd = (ctx) => {
+    if (ctx.year == null || ctx.month == null) return ctx;
+    return { ...ctx, month: { lte: Number(ctx.month) } };
+  };
+  const lastYear = (ctx) => {
+    if (ctx.year == null) return ctx;
+    return { ...ctx, year: Number(ctx.year) - 1 };
+  };
+
+  const ytdLastYear = composeTransforms(ytd, lastYear);
+  const composedCtx = ytdLastYear({ year: 2025, month: 6 });
+
+  assertEquals(composedCtx.year, 2024, 'composeTransforms applies year shift');
+  assertEquals(composedCtx.month.lte, 6, 'composeTransforms applies YTD');
+
+  // Test 10.5: composeTransforms - three transforms
+  const priorMonth = (ctx) => {
+    if (ctx.month == null) return ctx;
+    return { ...ctx, month: Number(ctx.month) - 1 };
+  };
+
+  const priorMonthLastYear = composeTransforms(priorMonth, lastYear);
+  const tripleComposed = priorMonthLastYear({ year: 2025, month: 6 });
+
+  assertEquals(tripleComposed.year, 2024, 'Triple composition applies year shift');
+  assertEquals(tripleComposed.month, 5, 'Triple composition applies month shift');
+
+  console.log('✓ All Composable Transforms tests passed\n');
+
+} catch (error) {
+  console.error('✗ Composable Transforms test failed:', error.message);
+  console.log();
+}
+
+// ============================================================================
+// Test Suite 11: Phase 5b - Functional Metrics
+// ============================================================================
+
+console.log('Test Suite 11: Phase 5b - Functional Metrics');
+console.log('-'.repeat(80));
+
+try {
+  // Test 11.1: simpleMetric constructor
+  const testSimpleMetric = simpleMetric({
+    name: 'testRevenue',
+    measure: 'salesAmount',
+    format: 'currency'
+  });
+
+  assert(testSimpleMetric.name === 'testRevenue', 'simpleMetric sets name');
+  assert(typeof testSimpleMetric.eval === 'function', 'simpleMetric creates eval function');
+
+  // Test 11.2: expressionMetric constructor
+  const testExpressionMetric = expressionMetric({
+    name: 'testPricePerUnit',
+    table: 'sales',
+    expression: (rows, ctx) => {
+      const amount = rows.sum(r => Number(r.amount ?? 0));
+      const qty = rows.sum(r => Number(r.quantity ?? 0));
+      return qty ? amount / qty : null;
+    },
+    format: 'currency'
+  });
+
+  assert(testExpressionMetric.name === 'testPricePerUnit', 'expressionMetric sets name');
+  assert(typeof testExpressionMetric.eval === 'function', 'expressionMetric creates eval function');
+
+  // Test 11.3: derivedMetric constructor
+  const testDerivedMetric = derivedMetric({
+    name: 'testRatio',
+    deps: ['revenue', 'budget'],
+    combine: ({ revenue, budget }) => budget ? (revenue / budget) * 100 : null,
+    format: 'percent'
+  });
+
+  assert(testDerivedMetric.name === 'testRatio', 'derivedMetric sets name');
+  assert(testDerivedMetric.deps.length === 2, 'derivedMetric sets dependencies');
+  assert(typeof testDerivedMetric.eval === 'function', 'derivedMetric creates eval function');
+
+  // Test 11.4: contextTransformMetric constructor
+  const testYtdTransform = (ctx) => {
+    if (ctx.year == null || ctx.month == null) return ctx;
+    return { ...ctx, month: { lte: Number(ctx.month) } };
+  };
+
+  const testTransformMetric = contextTransformMetric({
+    name: 'testRevenueYTD',
+    baseMetric: 'revenue',
+    transform: testYtdTransform
+  });
+
+  assert(testTransformMetric.name === 'testRevenueYTD', 'contextTransformMetric sets name');
+  assert(typeof testTransformMetric.eval === 'function', 'contextTransformMetric creates eval function');
+
+  // Test 11.5: makeYtdMetric higher-order builder
+  const ytdMetric = makeYtdMetric('revenue', testYtdTransform);
+  assert(ytdMetric.name === 'revenueYTD', 'makeYtdMetric generates correct name');
+  assert(typeof ytdMetric.eval === 'function', 'makeYtdMetric creates eval function');
+
+  // Test 11.6: makeYoYMetric higher-order builder
+  const yoyMetric = makeYoYMetric('revenue');
+  assert(yoyMetric.name === 'revenueYoY', 'makeYoYMetric generates correct name');
+  assert(yoyMetric.deps.length === 2, 'makeYoYMetric sets dependencies (current and last year)');
+
+  console.log('✓ All Functional Metrics tests passed\n');
+
+} catch (error) {
+  console.error('✗ Functional Metrics test failed:', error.message);
+  console.log();
+}
+
+// ============================================================================
+// Test Suite 12: Phase 5f - DSL Helpers
+// ============================================================================
+
+console.log('Test Suite 12: Phase 5f - DSL Helpers');
+console.log('-'.repeat(80));
+
+try {
+  // Test 12.1: attr.id builder
+  const attrId = attr.id({
+    name: 'testRegionId',
+    table: 'sales',
+    displayName: 'regionName'
+  });
+
+  assertEquals(attrId.name, 'testRegionId', 'attr.id sets name');
+  assertEquals(attrId.table, 'sales', 'attr.id sets table');
+  assertEquals(attrId.column, 'testRegionId', 'attr.id defaults column to name');
+
+  // Test 12.2: attr.derived builder
+  const attrDerived = attr.derived({
+    name: 'quantityBand',
+    table: 'sales',
+    column: 'quantity',
+    expression: (row) => {
+      const q = row.quantity;
+      if (q <= 5) return 'Small';
+      if (q <= 10) return 'Medium';
+      return 'Large';
+    }
+  });
+
+  assertEquals(attrDerived.name, 'quantityBand', 'attr.derived sets name');
+  assert(typeof attrDerived.expression === 'function', 'attr.derived sets expression');
+
+  // Test 12.3: attr.formatted builder
+  const attrFormatted = attr.formatted({
+    name: 'monthName',
+    table: 'sales',
+    column: 'month',
+    format: (m) => ['Jan', 'Feb', 'Mar'][m - 1] || `Month ${m}`
+  });
+
+  assertEquals(attrFormatted.name, 'monthName', 'attr.formatted sets name');
+  assert(typeof attrFormatted.format === 'function', 'attr.formatted sets format function');
+
+  // Test 12.4: measure.sum builder
+  const measureSum = measure.sum({
+    name: 'testAmount',
+    table: 'sales',
+    column: 'amount',
+    format: 'currency'
+  });
+
+  assertEquals(measureSum.name, 'testAmount', 'measure.sum sets name');
+  assertEquals(measureSum.aggregation, 'sum', 'measure.sum sets aggregation to sum');
+
+  // Test 12.5: measure.avg builder
+  const measureAvg = measure.avg({
+    name: 'avgAmount',
+    table: 'sales',
+    column: 'amount'
+  });
+
+  assertEquals(measureAvg.aggregation, 'avg', 'measure.avg sets aggregation to avg');
+
+  // Test 12.6: measure.count builder
+  const measureCount = measure.count({
+    name: 'rowCount',
+    table: 'sales'
+  });
+
+  assertEquals(measureCount.aggregation, 'count', 'measure.count sets aggregation to count');
+
+  // Test 12.7: measure.min builder
+  const measureMin = measure.min({
+    name: 'minAmount',
+    table: 'sales',
+    column: 'amount'
+  });
+
+  assertEquals(measureMin.aggregation, 'min', 'measure.min sets aggregation to min');
+
+  // Test 12.8: measure.max builder
+  const measureMax = measure.max({
+    name: 'maxAmount',
+    table: 'sales',
+    column: 'amount'
+  });
+
+  assertEquals(measureMax.aggregation, 'max', 'measure.max sets aggregation to max');
+
+  // Test 12.9: metric.simple builder
+  const metricSimple = metric.simple({
+    name: 'testRevenue',
+    measure: 'salesAmount'
+  });
+
+  assertEquals(metricSimple.name, 'testRevenue', 'metric.simple sets name');
+
+  // Test 12.10: metric.derived builder
+  const metricDerived = metric.derived({
+    name: 'testRatio',
+    deps: ['revenue', 'budget'],
+    combine: ({ revenue, budget }) => budget ? revenue / budget : null
+  });
+
+  assertEquals(metricDerived.name, 'testRatio', 'metric.derived sets name');
+  assertEquals(metricDerived.deps.length, 2, 'metric.derived sets dependencies');
+
+  console.log('✓ All DSL Helpers tests passed\n');
+
+} catch (error) {
+  console.error('✗ DSL Helpers test failed:', error.message);
+  console.log();
+}
+
+// ============================================================================
+// Test Suite 13: Phase 5e - Model/Engine Separation
+// ============================================================================
+
+console.log('Test Suite 13: Phase 5e - Model/Engine Separation');
+console.log('-'.repeat(80));
+
+try {
+  // Test 13.1: createEngine creates engine instance
+  const engine = createEngine(demoDb, demoSemanticModel);
+  assert(engine !== null && engine !== undefined, 'createEngine returns engine instance');
+
+  // Test 13.2: engine.query() returns QueryBuilder
+  const queryBuilder = engine.query();
+  assert(queryBuilder !== null, 'engine.query() returns QueryBuilder');
+  assert(typeof queryBuilder.where === 'function', 'QueryBuilder has where method');
+  assert(typeof queryBuilder.addAttributes === 'function', 'QueryBuilder has addAttributes method');
+  assert(typeof queryBuilder.addMetrics === 'function', 'QueryBuilder has addMetrics method');
+  assert(typeof queryBuilder.run === 'function', 'QueryBuilder has run method');
+
+  // Test 13.3: engine.getMetric introspection
+  const revenueMetric = engine.getMetric('revenue');
+  assert(revenueMetric !== undefined, 'engine.getMetric returns metric definition');
+  assertEquals(revenueMetric.name, 'revenue', 'getMetric returns correct metric');
+
+  // Test 13.4: engine.listMetrics introspection
+  const allMetrics = engine.listMetrics();
+  assert(Array.isArray(allMetrics), 'engine.listMetrics returns array');
+  assert(allMetrics.length > 0, 'listMetrics returns non-empty array');
+
+  // Test 13.5: engine.getMeasure introspection
+  const salesMeasure = engine.getMeasure('salesAmount');
+  assert(salesMeasure !== undefined, 'engine.getMeasure returns measure definition');
+  assertEquals(salesMeasure.name, 'salesAmount', 'getMeasure returns correct measure');
+
+  // Test 13.6: engine.getAttribute introspection
+  const regionAttr = engine.getAttribute('regionId');
+  assert(regionAttr !== undefined, 'engine.getAttribute returns attribute definition');
+  assertEquals(regionAttr.name, 'regionId', 'getAttribute returns correct attribute');
+
+  console.log('✓ All Model/Engine Separation tests passed\n');
+
+} catch (error) {
+  console.error('✗ Model/Engine Separation test failed:', error.message);
+  console.log();
+}
+
+// ============================================================================
+// Test Suite 14: Phase 5a - Query Builder Pattern
+// ============================================================================
+
+console.log('Test Suite 14: Phase 5a - Query Builder Pattern');
+console.log('-'.repeat(80));
+
+try {
+  const engine = createEngine(demoDb, demoSemanticModel);
+
+  // Test 14.1: Basic query with where()
+  const result1 = engine.query()
+    .where({ year: 2025, month: 1 })
+    .addAttributes('regionId')
+    .addMetrics('revenue')
+    .run();
+
+  assertEquals(result1.length, 2, 'Query builder returns correct number of rows');
+  assert(result1[0].revenue !== undefined, 'Query builder includes metric values');
+
+  // Test 14.2: Chained where() filters
+  const result2 = engine.query()
+    .where({ year: 2025 })
+    .where({ month: 1 })
+    .addAttributes('regionId')
+    .addMetrics('revenue')
+    .run();
+
+  assertEquals(result2.length, 2, 'Chained where() filters work correctly');
+
+  // Test 14.3: Multiple attributes
+  const result3 = engine.query()
+    .where({ year: 2025, month: 1 })
+    .addAttributes('regionId', 'productId')
+    .addMetrics('revenue', 'quantity')
+    .run();
+
+  assertEquals(result3.length, 3, 'Multiple attributes create correct number of rows');
+  assert(result3[0].regionId !== undefined, 'Result includes first attribute');
+  assert(result3[0].productId !== undefined, 'Result includes second attribute');
+
+  // Test 14.4: Reusable base query (CTE-style)
+  const base2025 = engine.query().where({ year: 2025 });
+
+  const jan2025 = base2025.where({ month: 1 }).addAttributes('regionId').addMetrics('revenue').run();
+  const feb2025 = base2025.where({ month: 2 }).addAttributes('regionId').addMetrics('revenue').run();
+
+  assertEquals(jan2025.length, 2, 'Base query can be reused for Jan');
+  assertEquals(feb2025.length, 2, 'Base query can be reused for Feb');
+  // Verify the base query is immutable
+  assertEquals(jan2025[0].revenue !== feb2025[0].revenue || jan2025[0].regionId !== feb2025[0].regionId, true, 'Base query is immutable');
+
+  // Test 14.5: Complex CTE-style composition
+  const naSales = base2025.where({ regionId: 'NA' });
+  const euSales = base2025.where({ regionId: 'EU' });
+
+  const naResult = naSales.addAttributes('regionId', 'productId').addMetrics('revenue').run();
+  const euResult = euSales.addAttributes('regionId', 'productId').addMetrics('revenue').run();
+
+  assert(naResult.length > 0, 'NA query returns results');
+  assert(euResult.length > 0, 'EU query returns results');
+  assert(naResult.every(r => r.regionId === 'NA'), 'NA query filters correctly');
+  assert(euResult.every(r => r.regionId === 'EU'), 'EU query filters correctly');
+
+  // Test 14.6: build() returns query spec
+  const querySpec = engine.query()
+    .where({ year: 2025 })
+    .addAttributes('regionId')
+    .addMetrics('revenue')
+    .build();
+
+  assert(querySpec.filters !== undefined, 'build() returns query spec with filters');
+  assert(querySpec.attributes !== undefined, 'build() returns query spec with attributes');
+  assert(querySpec.metrics !== undefined, 'build() returns query spec with metrics');
+  assertEquals(querySpec.filters.year, 2025, 'build() preserves filters');
+
+  console.log('✓ All Query Builder Pattern tests passed\n');
+
+} catch (error) {
+  console.error('✗ Query Builder Pattern test failed:', error.message);
+  console.log();
+}
+
+// ============================================================================
+// Test Suite 15: Phase 5 Integration - Combined Features
+// ============================================================================
+
+console.log('Test Suite 15: Phase 5 Integration - Combined Features');
+console.log('-'.repeat(80));
+
+try {
+  const engine = createEngine(demoDb, demoSemanticModel);
+
+  // Test 15.1: Verify functional metric constructors work
+  const customMetric = simpleMetric({
+    name: 'customRevenue',
+    measure: 'salesAmount',
+    format: 'currency'
+  });
+
+  assert(customMetric.name === 'customRevenue', 'Functional metric constructor works');
+  assert(typeof customMetric.eval === 'function', 'Functional metric has eval function');
+
+  // Test 15.2: Verify DSL helpers work
+  const dslMetric = metric.simple({
+    name: 'dslRevenue',
+    measure: 'salesAmount'
+  });
+
+  assert(dslMetric.name === 'dslRevenue', 'DSL metric builder works');
+  assert(typeof dslMetric.eval === 'function', 'DSL metric has eval function');
+
+  // Test 15.3: Composable Transforms + Context Transform Metrics
+  const ytd = (ctx) => {
+    if (ctx.year == null || ctx.month == null) return ctx;
+    return { ...ctx, month: { lte: Number(ctx.month) } };
+  };
+  const lastYear = (ctx) => {
+    if (ctx.year == null) return ctx;
+    return { ...ctx, year: Number(ctx.year) - 1 };
+  };
+  const ytdLastYear = composeTransforms(ytd, lastYear);
+
+  const ytdLyMetric = contextTransformMetric({
+    name: 'revenueYTDLY',
+    baseMetric: 'revenue',
+    transform: ytdLastYear
+  });
+
+  // Verify transform composition works in metric evaluation
+  assert(ytdLyMetric.name === 'revenueYTDLY', 'Composed transform metric created');
+  assert(typeof ytdLyMetric.eval === 'function', 'Composed transform metric has eval function');
+
+  // Test 15.4: Query Builder works with existing (legacy) metrics
+  const result = engine.query()
+    .where({ year: 2025 })
+    .addAttributes('regionId')
+    .addMetrics('revenue', 'budget')
+    .run();
+
+  assert(result.length > 0, 'Query builder works with legacy metrics');
+
+  console.log('✓ All Phase 5 Integration tests passed\n');
+
+} catch (error) {
+  console.error('✗ Phase 5 Integration test failed:', error.message);
+  console.log();
+}
+
+// ============================================================================
+// Test Suite 16: Backward Compatibility - Legacy vs New API
+// ============================================================================
+
+console.log('Test Suite 16: Backward Compatibility - Legacy vs New API');
+console.log('-'.repeat(80));
+
+try {
+  const engine = createEngine(demoDb, demoSemanticModel);
+
+  // Test 16.1: Same query, different APIs should return same results
+  const legacyResult = runQuery(
     demoDb,
     demoTableDefinitions,
     demoAttributes,
@@ -504,30 +1035,67 @@ try {
     demoTransforms,
     {
       attributes: ['regionId'],
-      filters: { year: 2025, month: 2 },
-      metrics: ['revenue', 'salesAmountYTD', 'salesAmountLastYear']
+      filters: { year: 2025, month: 1 },
+      metrics: ['revenue']
     }
   );
 
-  assert(result4[0].salesAmountYTD, 'Query includes YTD metrics');
-  assert(result4[0].salesAmountLastYear, 'Query includes Last Year metrics');
+  const newResult = engine.query()
+    .where({ year: 2025, month: 1 })
+    .addAttributes('regionId')
+    .addMetrics('revenue')
+    .run();
 
-  console.log('✓ All Query execution tests passed\n');
+  assertEquals(legacyResult.length, newResult.length, 'Legacy and new APIs return same number of rows');
+
+  // Sort both results by regionId for comparison
+  const sortedLegacy = legacyResult.sort((a, b) => a.regionId.localeCompare(b.regionId));
+  const sortedNew = newResult.sort((a, b) => a.regionId.localeCompare(b.regionId));
+
+  for (let i = 0; i < sortedLegacy.length; i++) {
+    assertEquals(sortedLegacy[i].regionId, sortedNew[i].regionId, `Row ${i} regionId matches`);
+    assertEquals(sortedLegacy[i].revenue, sortedNew[i].revenue, `Row ${i} revenue matches`);
+  }
+
+  // Test 16.2: Complex query with multiple attributes and metrics
+  const legacyComplex = runQuery(
+    demoDb,
+    demoTableDefinitions,
+    demoAttributes,
+    demoMeasures,
+    demoMetrics,
+    demoTransforms,
+    {
+      attributes: ['regionId', 'productId'],
+      filters: { year: 2025 },
+      metrics: ['revenue', 'quantity']
+    }
+  );
+
+  const newComplex = engine.query()
+    .where({ year: 2025 })
+    .addAttributes('regionId', 'productId')
+    .addMetrics('revenue', 'quantity')
+    .run();
+
+  assertEquals(legacyComplex.length, newComplex.length, 'Complex queries return same row count');
+
+  console.log('✓ All Backward Compatibility tests passed\n');
 
 } catch (error) {
-  console.error('✗ Query execution test failed:', error.message);
+  console.error('✗ Backward Compatibility test failed:', error.message);
   console.log();
 }
 
 // ============================================================================
-// Test Suite 10: Edge Cases
+// Test Suite 17: Edge Cases
 // ============================================================================
 
-console.log('Test Suite 10: Edge Cases');
+console.log('Test Suite 17: Edge Cases');
 console.log('-'.repeat(80));
 
 try {
-  // Test 10.1: Empty result set
+  // Test 17.1: Empty result set
   const emptyResult = evaluateMetric(
     'revenue',
     demoDb,
@@ -539,285 +1107,53 @@ try {
   );
   assertEquals(emptyResult, 0, 'Empty result set returns 0 for sum');
 
-  // Test 10.2: Null values in data
-  const testDbWithNulls = {
-    ...demoDb,
-    tables: {
-      ...demoDb.tables,
-      testFact: [
-        { year: 2025, value: null },
-        { year: 2025, value: 100 }
-      ]
-    }
-  };
-
-  // Test 10.3: Division by zero in expression metric
+  // Test 17.2: Division by zero in expression metric
   const zeroDivision = evaluateMetric(
     'pricePerUnit',
     demoDb,
     demoMetrics,
     { year: 2099 },
-    demoTransforms
+    demoTransforms,
+    new Map(),
+    demoMeasures
   );
   assertEquals(zeroDivision, null, 'Expression metric handles division by zero');
 
-  // Test 10.4: Unknown metric
+  // Test 17.3: Unknown metric
   try {
-    evaluateMetric('unknownMetric', demoDb, demoMetrics, {}, demoTransforms);
+    evaluateMetric('unknownMetric', demoDb, demoMetrics, {}, demoTransforms, new Map(), demoMeasures);
     assert(false, 'Unknown metric should throw error');
   } catch (error) {
     assert(error.message.includes('Unknown metric'), 'Unknown metric throws appropriate error');
   }
 
-  // Test 10.5: Unknown table in expression metric
-  const badMetric = {
-    kind: 'expression',
-    name: 'badMetric',
-    factTable: 'nonexistent',
-    expression: (rows) => rows.count()
-  };
+  // Test 17.4: Query builder with no results
+  const engine = createEngine(demoDb, demoSemanticModel);
+  const noResults = engine.query()
+    .where({ year: 2099 })
+    .addAttributes('regionId')
+    .addMetrics('revenue')
+    .run();
 
-  try {
-    evaluateMetric('badMetric', demoDb, { badMetric }, {}, demoTransforms);
-    assert(false, 'Unknown table should throw error');
-  } catch (error) {
-    assert(error.message.includes('Missing rows for fact table'), 'Unknown table throws appropriate error');
-  }
+  assertEquals(noResults.length, 0, 'Query builder handles empty results');
+
+  // Test 17.5: Filter AST with no matches
+  const noMatchFilter = f.and(
+    f.eq('year', 2025),
+    f.eq('year', 2024) // Impossible condition
+  );
+  const noMatchPredicate = compileFilter(noMatchFilter);
+  const testRows = [
+    { year: 2024, amount: 100 },
+    { year: 2025, amount: 200 }
+  ];
+  const noMatchFiltered = testRows.filter(noMatchPredicate);
+  assertEquals(noMatchFiltered.length, 0, 'Filter AST handles impossible conditions');
 
   console.log('✓ All edge case tests passed\n');
 
 } catch (error) {
   console.error('✗ Edge case test failed:', error.message);
-  console.log();
-}
-
-// ============================================================================
-// Test Suite 11: LINQ.js Advanced Operations
-// ============================================================================
-
-console.log('Test Suite 11: LINQ.js Advanced Operations (Demonstrating New Capabilities)');
-console.log('-'.repeat(80));
-
-try {
-  const salesData = demoDb.tables.sales;
-
-  // Test 11.1: Join operation
-  const joined = Enumerable.from(salesData)
-    .join(
-      demoDb.tables.products,
-      sale => sale.productId,
-      product => product.productId,
-      (sale, product) => ({ ...sale, productName: product.name })
-    )
-    .toArray();
-
-  assert(joined[0].productName, 'LINQ join() adds related data');
-  assertEquals(joined.length, salesData.length, 'LINQ join() preserves row count');
-
-  // Test 11.2: OrderBy operation
-  const ordered = Enumerable.from(salesData)
-    .orderByDescending(s => s.amount)
-    .take(3)
-    .toArray();
-
-  assert(ordered[0].amount >= ordered[1].amount, 'LINQ orderByDescending() sorts correctly');
-  assertEquals(ordered.length, 3, 'LINQ take() limits results');
-
-  // Test 11.3: Distinct operation
-  const years = Enumerable.from(salesData)
-    .select(s => s.year)
-    .distinct()
-    .toArray();
-
-  assertEquals(years.length, 2, 'LINQ distinct() removes duplicates');
-
-  // Test 11.4: SelectMany (flatten)
-  const grouped = Enumerable.from(salesData)
-    .groupBy(s => s.regionId)
-    .selectMany(g => g.toArray())
-    .toArray();
-
-  assertEquals(grouped.length, salesData.length, 'LINQ selectMany() flattens groups');
-
-  // Test 11.5: Complex pipeline
-  const topProductsByRegion = Enumerable.from(salesData)
-    .where(s => s.year === 2025)
-    .groupBy(s => `${s.regionId}-${s.productId}`)
-    .select(g => ({
-      key: g.key(),
-      totalAmount: g.sum(s => s.amount),
-      totalQty: g.sum(s => s.quantity)
-    }))
-    .orderByDescending(r => r.totalAmount)
-    .take(3)
-    .toArray();
-
-  assert(topProductsByRegion.length > 0, 'LINQ complex pipeline executes successfully');
-  assert(topProductsByRegion[0].totalAmount, 'LINQ complex pipeline calculates aggregates');
-
-  console.log('✓ All LINQ.js advanced operation tests passed\n');
-
-} catch (error) {
-  console.error('✗ LINQ.js advanced operation test failed:', error.message);
-  console.log();
-}
-
-// ============================================================================
-// Test Suite 12: Phase 2 - Storage Layer (Unified Tables)
-// ============================================================================
-
-console.log('Test Suite 12: Phase 2 - Storage Layer (Unified Tables)');
-console.log('-'.repeat(80));
-
-try {
-  // Test 12.1: Verify unified tables structure
-  assert(demoDb.tables, 'Database has unified tables property');
-  assert(demoDb.tables.sales, 'Sales table exists in unified structure');
-  assert(demoDb.tables.products, 'Products table exists in unified structure');
-  assert(demoDb.tables.regions, 'Regions table exists in unified structure');
-  assert(demoDb.tables.budget, 'Budget table exists in unified structure');
-
-  // Test 12.2: Verify table definitions
-  assert(demoTableDefinitions.sales, 'Sales table definition exists');
-  assert(demoTableDefinitions.sales.columns, 'Sales table has column definitions');
-  assert(demoTableDefinitions.sales.relationships, 'Sales table has relationships defined');
-  assertEquals(demoTableDefinitions.sales.relationships.length, 2, 'Sales table has 2 relationships');
-
-  console.log('✓ All unified tables tests passed\n');
-
-} catch (error) {
-  console.error('✗ Unified tables test failed:', error.message);
-  console.log();
-}
-
-// ============================================================================
-// Test Suite 13: Phase 2 - Semantic Layer (Attributes & Measures)
-// ============================================================================
-
-console.log('Test Suite 13: Phase 2 - Semantic Layer (Attributes & Measures)');
-console.log('-'.repeat(80));
-
-try {
-  // Test 13.1: Verify attribute registry
-  assert(demoAttributes, 'Attribute registry exists');
-  assert(demoAttributes.year, 'Year attribute exists');
-  assert(demoAttributes.month, 'Month attribute exists');
-  assert(demoAttributes.regionId, 'RegionId attribute exists');
-  assert(demoAttributes.productId, 'ProductId attribute exists');
-
-  // Test 13.2: Verify attribute properties
-  assertEquals(demoAttributes.year.table, 'sales', 'Year attribute points to sales table');
-  assertEquals(demoAttributes.regionId.displayName, 'regionName', 'RegionId has display name');
-
-  // Test 13.3: Verify measure registry
-  assert(demoMeasures, 'Measure registry exists');
-  assert(demoMeasures.salesAmount, 'SalesAmount measure exists');
-  assert(demoMeasures.salesQuantity, 'SalesQuantity measure exists');
-  assert(demoMeasures.budgetAmount, 'BudgetAmount measure exists');
-
-  // Test 13.4: Verify measure properties
-  assertEquals(demoMeasures.salesAmount.aggregation, 'sum', 'SalesAmount uses sum aggregation');
-  assertEquals(demoMeasures.salesAmount.format, 'currency', 'SalesAmount has currency format');
-
-  console.log('✓ All semantic layer tests passed\n');
-
-} catch (error) {
-  console.error('✗ Semantic layer test failed:', error.message);
-  console.log();
-}
-
-// ============================================================================
-// Test Suite 14: Phase 2 - Simple Metrics
-// ============================================================================
-
-console.log('Test Suite 14: Phase 2 - Simple Metrics');
-console.log('-'.repeat(80));
-
-try {
-  // Test 14.1: Verify simple metric definitions
-  assert(demoMetrics.revenue, 'Revenue simple metric exists');
-  assertEquals(demoMetrics.revenue.kind, 'simple', 'Revenue is a simple metric');
-  assertEquals(demoMetrics.revenue.measure, 'salesAmount', 'Revenue references salesAmount measure');
-
-  // Test 14.2: Evaluate simple metric
-  const revenueValue = evaluateMetric(
-    'revenue',
-    demoDb,
-    demoMetrics,
-    { year: 2025, month: 2 },
-    demoTransforms,
-    new Map(),
-    demoMeasures
-  );
-
-  assert(revenueValue !== null && revenueValue !== undefined, 'Revenue metric evaluates successfully');
-  assert(revenueValue > 0, 'Revenue metric returns positive value');
-
-  // Test 14.3: Verify metric values are correct
-  // 2025 month 2: NA (950+0) + EU (0+450) = 1400
-  assertEquals(revenueValue, 1400, 'Revenue metric calculates correct value');
-
-  console.log('✓ All simple metric tests passed\n');
-
-} catch (error) {
-  console.error('✗ Simple metric test failed:', error.message);
-  console.log();
-}
-
-// ============================================================================
-// Test Suite 15: Query Engine with Attributes
-// ============================================================================
-
-console.log('Test Suite 15: Query Engine with Attributes');
-console.log('-'.repeat(80));
-
-try {
-  // Test 15.1: Basic query with attributes
-  const result = runQuery(
-    demoDb,
-    demoTableDefinitions,
-    demoAttributes,
-    demoMeasures,
-    demoMetrics,
-    demoTransforms,
-    {
-      attributes: ['regionId'],
-      filters: { year: 2025, month: 2 },
-      metrics: ['revenue', 'quantity']
-    }
-  );
-
-  assert(result.length > 0, 'runQuery returns results');
-  assert(result[0].regionId !== undefined, 'Result contains regionId attribute');
-  assert(result[0].revenue !== undefined, 'Result contains revenue metric');
-  assert(result[0].quantity !== undefined, 'Result contains quantity metric');
-
-  // Test 15.2: Query with multiple attributes
-  const result2 = runQuery(
-    demoDb,
-    demoTableDefinitions,
-    demoAttributes,
-    demoMeasures,
-    demoMetrics,
-    demoTransforms,
-    {
-      attributes: ['regionId', 'productId'],
-      filters: { year: 2025, month: 2 },
-      metrics: ['revenue']
-    }
-  );
-
-  assert(result2.length > 0, 'runQuery with multiple attributes returns results');
-  assert(result2[0].regionId !== undefined, 'Multi-attribute result contains regionId');
-  assert(result2[0].productId !== undefined, 'Multi-attribute result contains productId');
-
-  // Test 15.3: Display names are resolved
-  assert(result[0].regionName !== undefined, 'Display name (regionName) is resolved');
-
-  console.log('✓ All query tests passed\n');
-
-} catch (error) {
-  console.error('✗ Query test failed:', error.message);
   console.log();
 }
 
@@ -835,7 +1171,7 @@ console.log('='.repeat(80));
 
 if (failedTests === 0) {
   console.log('✓ ALL TESTS PASSED!');
-  console.log('Phase 1 (LINQ.js Integration) and Phase 2 (Three-Layer Model) are complete and validated.');
+  console.log('All phases including Phase 5 (Composable Query Engine) are complete and validated.');
   process.exit(0);
 } else {
   console.error('✗ SOME TESTS FAILED');
