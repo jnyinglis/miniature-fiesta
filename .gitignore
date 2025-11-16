@@ -2,6 +2,10 @@
 dist/
 build/
 *.js.map
+# Compiled TypeScript output in root
+/semanticEngine.js
+/linq.js
+/linq.d.ts
 
 # Node modules
 node_modules/
