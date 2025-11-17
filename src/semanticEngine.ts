@@ -392,11 +392,30 @@ export interface MetricDef {
 export type MetricDefRegistry = Record<string, MetricDef>;
 
 /**
+ * Helper functions available to context transforms
+ */
+export interface TransformHelpers {
+  db: InMemoryDb;
+
+  // Data access
+  rows(tableName: string): Enumerable.IEnumerable<Row>;
+  first(tableName: string, predicate: (r: Row) => boolean): Row | undefined;
+  filterRows(tableName: string, predicate: (r: Row) => boolean): Enumerable.IEnumerable<Row>;
+
+  // Filter utilities
+  getFilterValue(field: string, ctx: FilterContext): FilterValue | undefined;
+  mergeFilters(...filters: (FilterContext | undefined)[]): FilterContext;
+  omitFilterFields(filter: FilterContext | undefined, ...fields: string[]): FilterContext;
+  asNumber(value: FilterValue | undefined): number | null;
+  f: typeof f;
+}
+
+/**
  * Context-transform functions (time intelligence, etc.).
- * Input: current filter context
+ * Input: current filter context and helpers
  * Output: transformed filter context
  */
-export type ContextTransformFn = (ctx: FilterContext) => FilterContext;
+export type ContextTransformFn = (ctx: FilterContext, helpers: TransformHelpers) => FilterContext;
 export type ContextTransformsRegistry = Record<string, ContextTransformFn>;
 
 /**
@@ -406,8 +425,8 @@ export type ContextTransformsRegistry = Record<string, ContextTransformFn>;
 export const composeTransforms = (
   ...transforms: ContextTransformFn[]
 ): ContextTransformFn => {
-  return (ctx: FilterContext) => {
-    return transforms.reduce((acc, t) => t(acc), ctx);
+  return (ctx: FilterContext, helpers: TransformHelpers) => {
+    return transforms.reduce((acc, t) => t(acc, helpers), ctx);
   };
 };
 
@@ -417,21 +436,21 @@ export const composeTransforms = (
 
 // Shift year by a given offset
 export const shiftYear = (offset: number): ContextTransformFn =>
-  (ctx: FilterContext) => {
+  (ctx: FilterContext, helpers: TransformHelpers) => {
     if (ctx.year == null) return ctx;
     return { ...ctx, year: Number(ctx.year) + offset };
   };
 
 // Shift month by a given offset
 export const shiftMonth = (offset: number): ContextTransformFn =>
-  (ctx: FilterContext) => {
+  (ctx: FilterContext, helpers: TransformHelpers) => {
     if (ctx.month == null) return ctx;
     return { ...ctx, month: Number(ctx.month) + offset };
   };
 
 // Rolling window of N months
 export const rollingMonths = (count: number): ContextTransformFn =>
-  (ctx: FilterContext) => {
+  (ctx: FilterContext, helpers: TransformHelpers) => {
     if (ctx.month == null) return ctx;
     const currentMonth = Number(ctx.month);
     return {
@@ -604,9 +623,10 @@ export function contextTransformMetric(opts: {
         throw new Error(`Unknown base metric: ${opts.baseMetric}`);
       }
 
+      const helpers = buildTransformHelpers(ctx.db);
       const transformedContext: MetricContext = {
         ...ctx,
-        filter: opts.transform(ctx.filter)
+        filter: opts.transform(ctx.filter, helpers)
       };
 
       return baseMetric.eval(transformedContext);
@@ -942,6 +962,104 @@ export function pick(obj: Row, keys: string[]): Row {
   return out;
 }
 
+/**
+ * Convert a Row[] to LINQ enumerable
+ */
+export function rowsToEnumerable(rows: Row[]): Enumerable.IEnumerable<Row> {
+  return Enumerable.from(rows);
+}
+
+/**
+ * Get a filter value from a context by field name
+ */
+export function getFilterValue(ctx: FilterContext, field: string): FilterValue | undefined {
+  return ctx?.[field];
+}
+
+/**
+ * Safely convert a FilterValue to a number
+ */
+export function asNumber(value: FilterValue | undefined): number | null {
+  if (value == null) return null;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const n = Number(value);
+    return isNaN(n) ? null : n;
+  }
+  // For range objects, this doesn't make sense
+  return null;
+}
+
+/**
+ * Merge multiple filter contexts into one
+ */
+export function mergeFilters(...filters: (FilterContext | undefined)[]): FilterContext {
+  const result: FilterContext = {};
+  for (const filter of filters) {
+    if (filter) {
+      Object.assign(result, filter);
+    }
+  }
+  return result;
+}
+
+/**
+ * Remove specific fields from a filter context
+ */
+export function omitFilterFields(filter: FilterContext | undefined, ...fields: string[]): FilterContext {
+  if (!filter) return {};
+  const result: FilterContext = { ...filter };
+  for (const field of fields) {
+    delete result[field];
+  }
+  return result;
+}
+
+/**
+ * Build TransformHelpers from a database
+ */
+export function buildTransformHelpers(db: InMemoryDb): TransformHelpers {
+  return {
+    db,
+
+    rows(tableName: string): Enumerable.IEnumerable<Row> {
+      const tableRows = db.tables[tableName] ?? [];
+      return rowsToEnumerable(tableRows);
+    },
+
+    first(tableName: string, predicate: (r: Row) => boolean): Row | undefined {
+      const tableRows = db.tables[tableName] ?? [];
+      return tableRows.find(predicate);
+    },
+
+    filterRows(
+      tableName: string,
+      predicate: (r: Row) => boolean
+    ): Enumerable.IEnumerable<Row> {
+      const tableRows = db.tables[tableName] ?? [];
+      return rowsToEnumerable(tableRows).where(predicate);
+    },
+
+    getFilterValue(field: string, ctx: FilterContext): FilterValue | undefined {
+      return getFilterValue(ctx, field);
+    },
+
+    mergeFilters(...filters: (FilterContext | undefined)[]): FilterContext {
+      return mergeFilters(...filters);
+    },
+
+    omitFilterFields(filter: FilterContext | undefined, ...fields: string[]): FilterContext {
+      return omitFilterFields(filter, ...fields);
+    },
+
+    asNumber(value: FilterValue | undefined): number | null {
+      return asNumber(value);
+    },
+
+    f,
+  };
+}
+
 
 /**
  * Metric evaluation engine
@@ -1051,7 +1169,8 @@ export function evaluateMetric(
     if (!transformFn) {
       throw new Error(`Unknown context transform: ${def.transform}`);
     }
-    const transformedContext = transformFn(context || {});
+    const helpers = buildTransformHelpers(db);
+    const transformedContext = transformFn(context || {}, helpers);
     value = evaluateMetric(
       def.baseMeasure,
       db,
@@ -1380,6 +1499,12 @@ export const demoDb: InMemoryDb = {
       { year: 2025, regionId: "NA", budgetAmount: 2200 },
       { year: 2025, regionId: "EU", budgetAmount: 1600 },
     ],
+    calendarMapping: [
+      { fromYear: 2025, fromMonth: 2, toYear: 2024, toMonth: 12 },
+      { fromYear: 2025, fromMonth: 1, toYear: 2024, toMonth: 11 },
+      { fromYear: 2024, fromMonth: 12, toYear: 2024, toMonth: 10 },
+      { fromYear: 2024, fromMonth: 11, toYear: 2024, toMonth: 9 },
+    ],
   },
 };
 
@@ -1544,20 +1669,110 @@ export const demoMeasures: MeasureRegistry = {
  */
 
 // Base transforms
-const ytd: ContextTransformFn = (ctx) => {
-  if (ctx.year == null || ctx.month == null) return ctx;
-  return { ...ctx, month: { lte: Number(ctx.month) } };
+const ytd: ContextTransformFn = (ctx, helpers) => {
+  const { getFilterValue, asNumber } = helpers;
+
+  const year = asNumber(getFilterValue('year', ctx));
+  const month = asNumber(getFilterValue('month', ctx));
+  if (year == null || month == null) return ctx;
+
+  return {
+    ...ctx,
+    year,
+    month: { lte: month }
+  };
 };
 
-const lastYear: ContextTransformFn = (ctx) => {
-  if (ctx.year == null) return ctx;
-  return { ...ctx, year: Number(ctx.year) - 1 };
+const lastYear: ContextTransformFn = (ctx, helpers) => {
+  const { getFilterValue, asNumber } = helpers;
+
+  const year = asNumber(getFilterValue('year', ctx));
+  if (year == null) return ctx;
+
+  return {
+    ...ctx,
+    year: year - 1
+  };
 };
 
-const priorMonth: ContextTransformFn = (ctx) => {
-  if (ctx.month == null) return ctx;
-  return { ...ctx, month: Number(ctx.month) - 1 };
+const priorMonth: ContextTransformFn = (ctx, helpers) => {
+  const { getFilterValue, asNumber } = helpers;
+
+  const month = asNumber(getFilterValue('month', ctx));
+  if (month == null) return ctx;
+
+  return {
+    ...ctx,
+    month: month - 1
+  };
 };
+
+/**
+ * Data-driven transform using a two-column mapping table
+ */
+const mappedPeriodTransform: ContextTransformFn = (ctx, helpers) => {
+  const { getFilterValue, first, asNumber, omitFilterFields } = helpers;
+
+  const year = asNumber(getFilterValue('year', ctx));
+  const month = asNumber(getFilterValue('month', ctx));
+  if (year == null || month == null) return ctx;
+
+  // Look up in the mapping table
+  const row = first('calendarMapping', (r) =>
+    r.fromYear === year && r.fromMonth === month
+  );
+
+  if (!row) {
+    // No mapping found → leave context unchanged
+    return ctx;
+  }
+
+  const { toYear, toMonth } = row;
+
+  // Drop year/month from existing filter, add mapped year/month
+  return {
+    ...omitFilterFields(ctx, 'year', 'month'),
+    year: toYear,
+    month: toMonth
+  };
+};
+
+/**
+ * Factory for creating generic two-column mapping transforms
+ */
+interface TwoColumnMappingOptions {
+  table: string;
+  fromYearField: string;
+  fromMonthField: string;
+  toYearField: string;
+  toMonthField: string;
+}
+
+export function createTwoColumnMappingTransform(
+  opts: TwoColumnMappingOptions
+): ContextTransformFn {
+  return (ctx, helpers) => {
+    const { getFilterValue, first, asNumber, omitFilterFields } = helpers;
+
+    const year = asNumber(getFilterValue(opts.fromYearField, ctx));
+    const month = asNumber(getFilterValue(opts.fromMonthField, ctx));
+    if (year == null || month == null) return ctx;
+
+    const row = first(opts.table, (r) =>
+      r[opts.fromYearField] === year && r[opts.fromMonthField] === month
+    );
+    if (!row) return ctx;
+
+    const toYear = row[opts.toYearField];
+    const toMonth = row[opts.toMonthField];
+
+    return {
+      ...omitFilterFields(ctx, opts.fromYearField, opts.fromMonthField),
+      [opts.toYearField]: toYear,
+      [opts.toMonthField]: toMonth
+    };
+  };
+}
 
 // Phase 5: Composed transforms using composeTransforms helper
 export const demoTransforms: ContextTransformsRegistry = {
@@ -1570,6 +1785,9 @@ export const demoTransforms: ContextTransformsRegistry = {
   // Parameterized transforms
   rolling3Months: rollingMonths(3),
   rolling6Months: rollingMonths(6),
+
+  // Data-driven transforms
+  mappedPeriod: mappedPeriodTransform,
 };
 
 /**
@@ -1686,6 +1904,15 @@ function buildDemoMetrics() {
     baseMeasure: "budget",
     transform: "lastYear",
     description: "Total budget in previous year.",
+    format: "currency",
+  });
+
+  // Data-driven transform metrics
+  addContextTransformMetric(demoMetrics, {
+    name: "salesAmountMappedPeriod",
+    baseMeasure: "revenue",
+    transform: "mappedPeriod",
+    description: "Total sales amount evaluated in a mapped period using calendarMapping (fromYear/fromMonth → toYear/toMonth).",
     format: "currency",
   });
 
